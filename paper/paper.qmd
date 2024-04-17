@@ -1,0 +1,513 @@
+---
+title: "Voting Patterns Unveiled"
+subtitle: "The Impact of Demographics and Economic Outlook in the 2020 Election"
+author: 
+  - Carl Fernandes
+  - Lexi Knight
+  - Raghav Bhatia
+thanks: "Code and data are available at: https://github.com/1raghav-bhatia/Voter-Outcomes.git"
+date: March 12, 2024
+date-format: long
+abstract: "This paper investigates voter demographics and economic outlook on preferences for candidates in the 2020 US presidential election. It was found that race and education played pivotal roles in determining support for Biden over Trump. Moreover, economic factors influenced voter sentiment with perceptions of economic hardship impacting candidate favorability. Awareness of these complex dynamics is imperative for grasping the landscape of American politics especially with the upcoming US election this November."
+toc: true
+format: pdf
+number-sections: true
+bibliography: references.bib
+---
+
+```{r}
+#| include: false
+#| warning: false
+#| message: false
+
+library(boot)
+library(broom.mixed)
+library(collapse)
+library(dataverse)
+library(janitor)
+library(knitr)
+library(marginaleffects)
+library(modelsummary)
+library(rstanarm)
+library(tidyverse)
+library(readr)
+library(here)
+library(kableExtra)
+library(arrow)
+
+### Reading the Data ###
+
+ces2020_data <- read_parquet("data/cleaned_data/ces2020_cleaned/part-0.parquet")
+
+### Reading the Model ###
+
+voter_outcomes_model <- readRDS(file = here("models/voter_outcomes_final.rds"))
+voter_outcomes_demographic_only_model <- readRDS(
+                                file = here("models/voter_outcomes_demographic_only.rds"))
+voter_outcomes_economic_only_model <- readRDS(
+                                file = here("models/voter_outcomes_economic_only.rds"))
+
+```
+
+
+# Introduction
+
+In an era shaped by rapid shifts in market sentiment and extensive global information flows, understanding the dynamics between market shocks and future short-term market volatility expectations remains crucial for both investors and policymakers. This research investigates the predictive relationship between short-term market shocks, as measured by the residuals of market returns, and their impact on future short-term market volatility expectations, represented by the Volatility Index (VIX). By examining the lagged effects of these shocks, this study challenges the efficient markets hypothesis [@fama1970efficient], which asserts that current prices fully reflect all available information and thus, no amount of historical data can predict future movements.
+
+The premise of this investigation is rooted in the observation that market participants often exhibit behavioral biases, such as the momentum effect [@jegadeesh1993returns], where investors assume that current market conditions will persist into the future. This bias suggests that positive market returns, which indicate good current conditions, might lead to a decrease in expected future risk, as reflected by the VIX. Conversely, negative shocks might increase future risk aversion, leading to higher implied volatility. These behaviors challenge the expectations of the efficient markets hypothesis, indicating a potential disconnect between market participant behavior and market efficiency theories.
+
+To explore this relationship, this study employs a generalized linear model (GLM) using detailed coefficients derived from Discrete Haar Transforms [@percival2000wavelet] of both market returns and VIX data. The primary estimand in this study is the effect of short-term market return shocks on the future short-term volatility expectations as measured by the VIX, particularly focusing on a two-month lag. This approach not only allows for the isolation of short-term fluctuations but also aligns with sophisticated financial modeling techniques that account for non-linear dependencies and temporal dynamics in financial data.
+
+This paper is structured to first detail the methods used for data collection and transformation, specifically focusing on the use of wavelet analysis to extract meaningful patterns from high-frequency financial data. Additionally, we construct a GLM model to showcase our methodology for analyzing this relationship. Following this, we present the results of our regression analysis, highlighting the significant predictive power of market shocks on future volatility. We conclude with a discussion on the implications of our findings for financial theory and practice, emphasizing how traditional models might need to adapt to incorporate behavioral biases and their effects on market dynamics.
+
+By bridging the gap between theoretical finance and empirical evidence, this research contributes to a deeper understanding of market dynamics and offers valuable insights into the predictive relationships that might inform future trading strategies and risk management practices.
+
+
+# Data {#sec-data}
+
+The analysis is based on the Cooperative Election Study (CES), from 2020 which contains a wealth of data on voter registration, preferences, demographics, and various opinions on national issues. The coding language and associated packages used are `R` [@citeR], the `tidyverse` [@Rpackage_tidyverse], `boot`[@Rpackage_boot], `broom.mixed` [@Rpackage_broom_mixed], `collapse`[@Rpackage_collapse] ,`dataverse` [@Rpackage_dataverse], `arrow` [@Rpackage_arrow], `rstanarm` [@Rpackage_rstanarm], `knitr` [@Rpackage_knitr], `janitor` [@Rpackage_janitor], `marginaleffects` [@Rpackage_marginaleffects], `here` [@Rpackage_here], and `modelsummary` [@Rpackage_modelsummary], `readr` [@Rpackage_readr] and `Kable Extra` [@Rpackage_kableExtra].The CES was conducted during a time of increased political activity and social discussions in the United States, providing a snapshot of the electorate during the 2020 Presidential election—a year marked by significant social and economic changes.
+
+This dataset is notable for its extensive coverage across geographical regions and the depth of topics covered. With over 60,000 respondents it offers a broadened perspective on voters, allowing for detailed examination of voter behavior and preferences beyond just party affiliations. It delves into the details of voter demographics and their nuanced views on matters.
+
+The main goal of utilizing this dataset is to understand how conditions around the 2020 election influenced voter preferences. The analysis focuses on determining whether individuals’ views on economics and personal financial situations played a role in their decision between President Trump and former Vice President Biden. The emphasis on how economic factors influence voting patterns becomes crucial considering the economic conditions experienced in 2020 marked by significant changes triggered by the impact of the COVID 19 outbreak.
+
+## Description of Variables and Context
+
+### Voter Registration (votereg)
+
+The variable `votereg` indicates if participants are registered to vote. Being registered to vote is an important indicator of political involvement and a necessary step for taking part in elections. This variable plays a role in filtering the data to focus on those who vote, ensuring that subsequent analyses accurately represent the behaviors and preferences of real participants in the voting process.
+
+### Preference for Presidential Candidates (voted_for)
+
+The `voted_for` variable shows the choice made by respondents between President Donald Trump and former Vice President Joe Biden in the 2020 election. This distinction offers insights into the political landscape of the United States during that period and acts as a primary measure for studying how other factors impact voter choices.
+
+### Gender (gender)
+
+The recording of `gender` aims to understand the composition of respondents and its potential impact on voting behavior. Gender dynamics often influence preferences and priorities, making this variable significant for our analysis. The equal distribution between female respondents, in this dataset mirrors the overall voting populace allowing for a balanced examination of gender related trends or differences.
+
+### Education Level (educ)
+
+The `educ` category indicates the level of education attained by individuals ranging from "No High School Diploma” to "Postgraduate Degree." Education plays a role in shaping awareness, policy preferences and voting tendencies. Examining the backgrounds of voters can provide insights into the complexity of the electorate and potential relationships between achievements and support for candidates.
+
+### Ethnicity (race)
+
+Ethnicity encompasses an array of identities, such as White, Black, Hispanic, Asian, Native American, Middle Eastern and others. As an aspect of group identity, ethnicity can influence political beliefs and alliances. Analyzing the `race` variable helps in understanding how racial demographics may have influenced leanings in elections given the increased attention to racial issues during the 2020 campaign season.
+
+### Household Income Changes (CC20_303)
+
+The `CC20_303` delves into how individuals have experienced shifts by inquiring about their household’s yearly income changes. It classifies these changes into five levels; "Increased significantly", "Increased", "Remained stable", "Decreased" and "Decreased significantly". Given the fluctuating economic climate impacted by the events of 2020, especially due to the COVID 19 pandemic, these responses hold significant relevance. They offer a foundation to gauge peoples outlook and may be linked to their voting preferences as financial well-being or challenges often play a role in shaping political inclinations.
+
+### National Economic Perception (CC20_302)
+
+The `CC20_302` variable captures people’s views on the economy’s performance. Respondents were asked to assess whether within the year the country’s economy has "Improved markedly " "Improved", "Stayed consistent", "Declined moderately", "Declined significantly " or if they were uncertain about it. This important economic indicator is vital as it could mirror the contentment or discontent of voters with how the current administration's managing economic matters and may play a significant role in their selection of a candidate.
+
+Adding these factors with voter registration and demographic details offers a set of data allowing for a thorough examination of the 2020 U.S. Presidential Election, from various angles. The subsequent investigation will dive into the specifics of these factors, uncovering the intricacies of voters’ views on the economy and how they might impact election results.
+ 
+## Alternative Datasets and Justification
+
+Researchers studying elections have access to a variety of datasets, each with its own focus and level of detail. While the American National Election Studies (ANES) and the General Social Survey (GSS) are well regarded for their insights into voter behavior and attitudes, the Cooperative Election Study (CES) from 2020 was chosen for this analysis for several reasons.
+
+The CES dataset is known for its breadth and timeliness, capturing a range of variables directly related to the 2020 election. Unlike ANES and GSS which provide perspectives over extended periods CES offers a view of the political landscape during a critical election year. Its large sample size allows for an examination of voter demographics and behaviors during a time when the U.S. was grappling with social and economic challenges.
+
+On the other hand, while ANES offers longitudinal data it may not offer as much specificity on economic variables crucial to our hypothesis—that voters’ economic perceptions and experiences leading up, to the 2020 election significantly influenced their voting choices. GSS, known for its range, in sciences may not capture the immediacy of economic sentiments as quickly as CES does. 
+
+Furthermore, CES’s methodological strengths lie in its sample size that allows for breakdowns by demographics while still representing a broad cross section of the American public. It delves into nuanced factors such as changes in household income and the national economic outlook, which are crucial to the hypothesis being explored.
+
+When it comes to the dataset construction, CES’s approach to gauging economic perceptions is particularly relevant as it reflects both nationwide trends and individual experiences. It goes beyond asking respondents about their opinions on the economy to inquire about shifts in their own household income creating a direct link between macroeconomic patterns and personal financial situations.
+
+Ultimately selecting CES for this analysis was a decision based on its provision of relevant data that is up to date for investigating the research question at hand. The dataset's emphasis on the 2020 election and incorporation of factors corresponds with our goal to analyze the economic factors that might have impacted voting patterns.
+
+## Data Cleaning and Preparation
+
+Ensuring the accuracy of the analysis involves cleaning and preparing the data. In the case of the 2020 Cooperative Election Study (CES) dataset various steps were taken to improve the quality and dependability of the findings.
+
+### Initial Data Review
+
+The first step was to examine the dataset for any discrepancies, missing data or unusual values that could impact the analysis. This included checking how responses were distributed across variables to confirm they fell within expected ranges and followed the guidelines outlined in the CES codebook.
+
+### Data Cleaning and Modification
+
+Transforming data played a role in preparing it for analysis. Numeric variables were converted into formats for interpretation. For instance:
+
+* The `gender` variable was changed from codes (1, for male, 2, for female) to categories "Male" and "Female." 
+* The variable 'education' was changed from numbers to categories, with labels like "No High School", "High School Graduate", "Some College", "2 Year College", "4 Year College" and "Post Graduate."
+* The factors `CC20_303` and `CC20_302` which represent shifts in household income and views on the economy were converted from values to descriptive categories ensuring each option was labeled meaningfully based on the survey choices.
+
+### Subsetting
+
+The focus of the analysis was on registered voters who expressed a preference for one of the candidates. Therefore the dataset was filtered to include individuals with a `votereg` value of 1 (registered voters) and those whose `CC20_410` values indicated support for either Biden or Trump.
+
+### Handling Missing Data
+
+Entries containing incomplete information were managed appropriately—either through imputation or exclusion depending on the severity and type of missing data. For example if there were a few cases with missing data, for the race variable those instances were excluded to ensure the analysis accuracy.
+
+### Validation and Testing
+
+Throughout the data cleaning process we conducted tests to confirm the changes and ensure that the data followed formats. These tests checked for factor levels, no missing values after imputation and proper application of recording rules.
+
+We meticulously documented the data cleaning and preparation procedures to maintain transparency and reproducibility of our findings.  In summary, by cleaning and preparing the CES dataset we have established a foundation for subsequent analysis. The next section will explore exploratory data analysis where visualizations of cleaned data will be used to uncover patterns and insights to behaviors and economic sentiments of the 2020 American electorate.
+
+## Summary Statistics and Graphical Representation
+
+```{r}
+#| echo: false
+#| eval: true
+#| warning: false
+#| message: false
+
+compute_summary_stats <- function(df, var) {
+  stats <- df %>%
+    count(!!sym(var)) %>%
+    rename(Category = !!sym(var)) %>%
+    mutate(Percent = n / sum(n) * 100)
+
+  total <- stats %>% summarize(Category = "Total", n = sum(n), Percent = sum(Percent))
+  stats <- bind_rows(stats, total)
+
+  stats
+}
+
+
+create_count_plot <- function(data, var_name, title_label, fill_colors) {
+  ggplot(data, aes_string(x = var_name, fill = var_name)) +
+    geom_bar() +
+    scale_fill_manual(values = fill_colors) +
+    labs(title = title_label, x = title_label, y = 'Count') +
+    theme_minimal() +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1), legend.position = "bottom") # Rotate x labels for readability and move legend to bottom
+}
+
+# Colors for the plots
+gender_colors <- c("Male" = "#1f77b4", "Female" = "#ff7f0e")
+education_colors <- c("No HS" = "#1f77b4", "High school graduate" = "#aec7e8", "Some college" = "#ffbb78", "2-year" = "#2ca02c", "4-year" = "#98df8a", "Post-grad" = "#d62728")
+race_colors <- c("White" = "#1f77b4", "Black" = "#ff7f0e", "Hispanic" = "#2ca02c", "Asian" = "#d62728", "Native American" = "#9467bd", "Middle Eastern" = "#8c564b", "Two or more races" = "#e377c2", "Other" = "#7f7f7f")
+region_colors <- c("Northeast" = "#1f77b4", "Midwest" = "#ff7f0e", "South" = "#2ca02c", "West" = "#d62728")
+marstat_colors <- c("Married" = "#1f77b4", "Separated" = "#ff7f0e", "Divorced" = "#2ca02c", "Widowed" = "#d62728", "Never married" = "#9467bd", "Domestic/civil partnership" = "#8c564b")
+income_colors <- c("Under $30,000" = "#1f77b4", "$30,000 to $49,999" = "#ff7f0e", "$50,000 to $99,999" = "#2ca02c", "$100,000 to $199,999" = "#d62728", "$200,000 or more" = "#9467bd")
+
+```
+
+The summary data from the Cooperative Election Study (CES) 2020 dataset provides an overview of the voter demographics and their economic perspectives.
+
+### Gender Representation
+
+In the dataset there are 24,303 female participants making up around 55.8% of the sample and 19,251 male participants accounting for approximately 44.2%. These numbers reflect trends showing that women tend to be politically engaged and active in voting during recent elections.
+
+```{r}
+#| echo: false
+#| eval: true
+#| warning: false
+#| message: false
+
+gender_stats <- compute_summary_stats(ces2020_data, "gender")
+kable(gender_stats)
+
+# Create and print the graph for 'gender'
+gender_plot <- create_count_plot(ces2020_data, "gender", "Gender", gender_colors)
+print(gender_plot)
+
+```
+
+### Educational Background
+
+The educational profile of respondents is varied with the majority holding a '4 year' college degree (26.4%) followed by high school graduates (22.5%) and individuals with some college education (21.3%). Those with graduate degrees make up 16.7% of the sample while '2 year' college graduates represent 11.4%. Participants without a high school diploma constitute a proportion at 1.6%. This distribution highlights the significance of considering education levels in analysis as they can influence awareness, participation, in civic activities and policy preferences.
+
+```{r}
+#| echo: false
+#| eval: true
+#| warning: false
+#| message: false
+education_stats <- compute_summary_stats(ces2020_data, "education")
+kable(education_stats)
+# Create and print the graph for 'education'
+
+education_plot <- create_count_plot(ces2020_data, "education", "Education Level", education_colors)
+print(education_plot)
+
+```
+
+
+### Race
+
+The majority of survey participants are White (76.3%) followed by African individuals at 9.5% and Hispanic or Latino respondents at 7%. A smaller portion of the group includes individuals (2.6%) those of 'Two or more races' (1.7%) Eastern individuals (1.7%) and Native Americans (0.7%). The presence of various  ethnic backgrounds among voters highlights the importance of considering how race, policy issues and voting patterns intersect.
+
+```{r}
+#| echo: false
+#| eval: true
+#| warning: false
+#| message: false
+
+race_stats <- compute_summary_stats(ces2020_data, "race")
+kable(race_stats)
+race_plot <- create_count_plot(ces2020_data, "race", "Race", race_colors)
+print(race_plot)
+```
+
+### National Economic Sentiment
+
+When it comes to perceptions of the economy a large percentage of respondents feel that the economy has either "Gotten worse" (41.4%) or "Gotten somewhat worse" (27.3%). Those who believe it has "Stayed about the same" make up 8.9% of participants while a smaller percentage think it has "Gotten somewhat better" (10.2%) or Gotten much better" (8.2%). A small fraction is uncertain about the outlook with 3.9% stating they are "Not sure". These findings suggest a view towards national economic conditions, during the election year which could impact voter decisions.
+
+```{r}
+#| echo: false
+#| eval: true
+#| warning: false
+#| message: false
+
+economic_outlook <- compute_summary_stats(ces2020_data, "economic_outlook")
+kable(economic_outlook)
+```
+
+### Change in Household Income
+
+People's experiences with changes in household income over the years vary widely. 31.2% mentioned that their income remained relatively stable while 18.3% saw a decrease and 10% noticed a slight increase. A smaller percentage, 10% faced a decrease while only 3.7% reported a substantial increase. These individual financial shifts could have effects on voting decisions in an election marked by economic uncertainty.
+These summarized figures provide a glimpse into the economic landscape of the dataset offering context, for understanding the outcomes of the 2020 election. The forthcoming analysis will explore how these elements might have influenced voting behavior in detail.
+
+```{r}
+#| echo: false
+#| eval: true
+#| warning: false
+#| message: false
+
+income_change <- compute_summary_stats(ces2020_data, "income_change")
+kable(income_change)
+```
+
+## Measurement
+
+Measuring variables in a dataset is crucial for ensuring the reliability and accuracy of research results. In the Cooperative Election Study (CES) 2020 important concepts like outlook, personal income changes, gender, education level and race were defined through crafted survey questions. These questions aimed to capture the characteristics and perspectives of the electorate.
+
+### Defining Key Terms
+
+ Economic Outlook (National Economics. CC20_302): Survey participants were asked to evaluate whether they believed the national economy had improved or worsened in the year. Their responses were rated on a six point scale from "Gotten much better" to "Gotten much worse " with an option for "Not sure." This measure reflects perceptions of conditions rather than objective economic data.
+ 
+ Household Income Changes (CC20_303): This factor assesses how respondents view changes in their household incomes over the year. Using a five point scale from "Increased a lot" to "Decreased a lot " it captures both negative shifts in situations. This measure offers insights into voters' direct experiences.
+ 
+  Gender: Participants identified themselves as either "Male" or "Female” in a manner. Understanding gender in this way is crucial for delving into how gender dynamics impact preferences and voting behavior.
+  
+ Education Level: The educational background of respondents was divided into six categories ranging from "No HS" to "Post grad " enabling an analysis of the relationship between education and various aspects such as beliefs, economic viewpoints and candidate preferences.
+ 
+ Race and Ethnicity: Respondents self-reported their race and ethnicity which were then categorized into groups like "White " "Black," "Hispanic," "" "Native American " "Middle Eastern " and those identifying with multiple races. This categorization is essential for exploring the influence of ethnic diversity on voting trends.
+
+### Considerations for Measurement
+
+The subjective nature of variables can lead to response biases since individual perceptions are shaped by experiences, media exposure and political affiliations. However, relying on self reported data offers insights into the electorate's mindset that objective data alone may not fully capture. The way education and race were measured in the study followed standards to ensure consistency with other research and data sets. However it's important to recognize that there can be experiences, within these broad categories, which calls for a thoughtful analysis of the findings.
+
+In general, the methods used to measure variables in the CES 2020 dataset allow for an exploration of voter demographics. While understanding the limitations of self reported data the datasets structure supports an examination of how factors economic views and voting patterns intersect. The thorough measurement approach sets a foundation for analyses offering a dependable framework for uncovering meaningful insights, into the dynamics of the 2020 Presidential election.
+
+
+
+
+# Model
+
+## Model set-up
+
+In this section, we frame the estimand in terms of a logistic regression model and subsequently use the model to find relationships between the response variable and input variables. We first specify the model and then justify its appropriateness to conduct the analysis. 
+
+### Model Specifications ###
+
+The model used in this analysis is a multiple logistic regression. The variables along with their distributions are given as below:
+
+\begin{align}
+y_i|\pi_i &\sim \mbox{Bern}(\pi_i) \\
+\text{logit}(\pi_i) &=  \beta_0 \, + \, \beta_1 \times \text{gender}_i 
+\, + \, \beta_2 \times \text{education}_i \, +  \, \beta_3 \times \text{race}_i \\
+&\quad \, + \, \beta_4 \times \text{economic outlook}_i \,
++ \, \beta_5 \times \text{income change}_i \\
+\beta_0 &\sim \text{Normal}(0, 2.5) \\
+\beta_1 &\sim \text{Normal}(0, 2.5) \\
+\beta_2 &\sim \text{Normal}(0, 2.5) \\
+\beta_3 &\sim \text{Normal}(0, 2.5) \\
+\beta_4 &\sim \text{Normal}(0, 2.5) \\
+\beta_5 &\sim \text{Normal}(0, 2.5)
+\end{align} 
+
+where:
+
+1. $y_i$ takes the value 1 if the respondent voted Biden and 0 if they voted Trump
+2. $\pi_i$ is the conditional probability of voting for Biden given respondent $i$
+3. $\mbox{Bern}(\pi_i)$ is the Bernoulli Distribution with parameter $\pi_i$
+4. $logit(x)$ is the logit function that maps $(0, 1)$ to $(-\infty, \infty)$
+5. $\text{gender}_i$ is the $i^\text{th}$ respondents gender which takes the value 1 for male and 0 for female
+6. $\text{education}_i$  is the $i^\text{th}$ respondents education level which takes values from 1 to 6 depending on the respondents education level
+7. $\text{race}_i$ is the $i^\text{th}$ respondents race which takes values from 1 to 7 depending on the respondents race
+8. $\text{economic outlook}_i$ is the $i^\text{th}$ respondents view on the economy which takes values on a scale from 1 to 6 depending on the respondents view of the economy
+9.  $\text{income change}_i$ is the $i^\text{th}$ respondents change in income which takes values on a scale from 1 to 5 depending on if the respondents income changed for the worse or better
+10. $\beta_0$ is the intercept of the logistic regression equation
+11. $\beta_1$ is the coefficient of the gender variable
+12. $\beta_2$ is the coefficient of the education variable
+13. $\beta_3$ is the coefficient of the race variable
+14. $\beta_4$ is the coefficient of the economic outlook variable
+15. $\beta_5$ is the coefficient of the income change variable
+
+The above model will be used later in the results section to find the impact of the input variables on voter preferences. For now, we justify certain characteristics of the model that capture certain real life aspects of the analysis. 
+
+### Model Justification ###
+
+Our goal is to find the effect that certain voter specific characteristics and non-partisan views have on a voter voting for Joe Biden. For that, we consider the framework of the model by considering the response variable, the input variables, and how they come together within the model structure.
+
+#### Response Variable ####
+
+Our variable of interest is voter preferences for Joe Biden. We assume that voting preference for Biden is a random variable and has a $\mbox{Bern}(\pi_i)$ distribution with $\pi_i$ being the 'likelihood of voting for Biden'. We choose specifically the random variable characterization because voting outcomes aren't deterministic but rather phenomenon subject to chance. This also aligns with the voting patterns we observe in the real world. 
+
+We estimate the 'likelihood of voting for Biden' by the using the conditional probability of voting for Biden given a certain respondent. 
+
+#### Input Variables ####
+
+The voter specific characteristics that we consider are:
+
+1. Gender
+2. Race
+3. Education
+4. Change in Income
+
+The non-partisan view of the respondents that we consider is:
+
+1. Economic Outlook 
+
+We assume for this analysis that all 5 variables have Normal prior distributions as based of our prior information, we can't conclude any specific form for any of the variables' distributions. All we can conclude is that the extreme values taken by each variable are less likely than their intermediate values and hence a suitable distribution to describe flat tails with a peak in the center is the normal distribution.
+
+#### Model Structure #####
+
+We construct a model that gives the conditional probability of voting for Biden from only the above 5 input variables. Probability is a measure taking values from $[0,1]$ which is why we use the logit function to transform the conditional probability to the unbounded real line. The logit function is appropriate in this context because it preserves the ordering of probabilities while expanding them to the entire real line. 
+
+Once we have the $logit(\pi_i)$, we define a linear relationship between this quantity and the 5 categorical variables. Taking the inverse of the logit function gives probability as a function of the 5 categorical variables. We then use this model to study the impact of the 5 categorical variables on voting for Biden. 
+
+\begin{align}
+\text{logit}(\pi_i) &=  \beta_0 \, + \, \beta_1 \times \text{gender}_i
+\, + \, \beta_2 \times \text{education}_i \, +  \, \beta_3 \times \text{race}_i \\
+&\quad \, + \, \beta_4 \times \text{economic outlook}_i
+\, + \, \beta_5 \times \text{income change}_i \\
+\pi_i &= \text{logit}^\text{-1} \text{(} \beta_0 \, + \, \beta_1 \times \mbox{gender}_i \,
++ \, \beta_2 \times \text{education}_i \, +  \, \beta_3 \times \text{race}_i \\
+&\quad \, + \, \beta_4 \times \text{economic outlook}_i \,
++ \, \beta_5 \times \text{income change}_i \text{)}
+\end{align}
+
+#### Parameter Estimation ####
+
+The model has 6 parameters  $\beta_0$, $\beta_1$, $\beta_2$, $\beta_3$, $\beta_4$, $\beta_5$ which need to be estimated from the cleaned_data dataset. These parameters are estimated by defining the model within the stan_glm() function from the [@Rpackage_rstanarm] package. The function uses Markov Chain Monte Carlo (MCMC) algorithms to create a chain of samples from the posterior distribution of each coefficient. This not only gives us point estimates, but also the posterior distribution of values for each coefficient. 
+
+The posterior distribution contains information about all of the coefficients moments, giving us estimates for not only the central values, but also the uncertainty associated with each estimate. Using the central moments as well as the 95% credibility intervals for the coefficients, helps us determine whether the input variables have an effect on voting preferences. 
+
+
+# Results
+
+This section looks at the results of the regression performed using the Model from the Model section and the cleaned data set. We first look at the results of our regression analysis, which includes, the parameter estimates and their credibility intervals. Subsequently, we explore select variables of interest and their effects on the probability of voting for Biden. Finally, we assess model fit using the $R^2$ metric and compare our final model's $R^2$ to the same model with certain terms dropped in order to assess the explanatory power of our model.  
+
+## Regression Results
+
+@tbl-coefficient-estimates contains the parameter estimates for the regression analysis. The regression analysis was done on a random sample of 10,000 observations out of 39,203 in order to speed up computational time while preserving the properties of the dataset. The first column of the @tbl-coefficient-estimates contains the parameter name. Since all the input variables are categorical variables, the regression creates indicator terms for each value the variable takes and estimates a unique coefficient based of that. 
+
+The second column contains the actual parameter point estimates. These estimates are based of the stan_glm() function from the [@Rpackage_rstanarm] package. The third column gives the standard error while the 4th and 5th columns give the lower and upper limit for the credibility intervals. The table was created from the model using the tidy() function from the [@Rpackage_broom_mixed] package, while the 'kable()' and 'kable_styling()' functions were used from [@Rpackage_knitr] and [@Rpackage_kableExtra]. 
+
+@fig-coefficient-estimates creates a plot of @tbl-coefficient-estimates with the estimate and standard errors shown. The plot shows the credibility intervals for each parameter.
+
+
+```{r}
+#| echo: false
+#| warning: false
+#| message: false
+#| label: tbl-coefficient-estimates
+#| tbl-cap: Parameter Estimates of the Multiple Logistic Regression
+
+library(broom.mixed)
+library(knitr)
+library(kableExtra)
+
+coeff <- tidy(voter_outcomes_model, conf.int = TRUE)
+cleaned_coeff <- kable(coeff, col.names = c(
+                        "Parameter", "Estimate", "Standard Error",
+                        "Credibility Interval Lower Limit", 
+                        "Credibility Interval Upper Limit"),
+                         digits = 2)
+cleaned_coeff
+```
+
+```{r}
+#| echo: false
+#| eval: true
+#| warning: false
+#| label: fig-coefficient-estimates
+#| fig-cap: Parameter Estimates and Confidence Intervals
+
+modelplot(voter_outcomes_model, conf_level = 0.9) +
+  labs(x = "90 per cent credibility interval")
+```
+
+From the table and the plot, we observe that the gender variable has a negative coefficient estimate, indicating that given the respondent is male holding all else fixed, they have a lower probability of voting Biden compared to Trump. The coefficient estimates for education are all positive indicating that a respondent with a high school degree or higher has a higher probability of voting for Biden over Trump. The coefficient estimates for Race are positive for all categories except 'two or more races' and 'native american' indicating that given a respondent is either 'Black', 'Asian', 'Middle Eastern' or 'Hispanic', they have a higher probability of favoring Biden.
+
+The economic variables which are 'economic outlook' and 'income change' have distinct patterns compared to the demographic variables which are 'Gender', 'Education', and 'Race'. For one, the economic outlook coefficients, given in @tbl-coefficient-estimates are all positive but much larger in magnitude than any of the other variable coefficients. This indicates that given a respondent who's outlook on the economy is between neutral and poor, we find that the respondent has a very high probability of favoring Biden over Trump.
+
+The same holds for change in income as most of the income coefficients are positive but negligible. This indicates that the respondents preferences based of income change are not very significant.
+
+### Model Fit ###
+
+We now assess the fit of the model to the data. The statistic that validates model fit in this situation is $R^2$. We compare our models $R^2$ with the $R^2$ of the model:
+
+1. Taking only demographic variables (Gender, Race, Education)
+2. Taking only economic variables (Economic Outlook, Income Change)
+
+These 2 different variants of the model are taken to show the improvement that our final model makes over both of them. We consider $R^2$ as a measure of model fit as it's a measure of the variation within the data explained by the model. The $R^2$ of all 3 models are given in @tbl-R-squared-estimates. The first column lists the parameters along with different statistical measures, including $R^2$. The second column gives the gives the coefficient estimates and $R^2$ of the main model. The third column gives the coefficient estimates and $R^2$ of the model taking only demographic variables as the input variables. The third column gives the same but for economic variables. 
+
+```{r}
+#| echo: false
+#| eval: true
+#| warning: false
+#| message: false
+#| label: tbl-R-squared-estimates
+#| tbl-cap: Models Coefficients and R-Squared Estimates
+
+library(modelsummary)
+
+model_summary <- modelsummary( 
+  list (
+    "Main Model" = voter_outcomes_model, 
+    "Economic Only" = voter_outcomes_demographic_only_model,
+    "Demographic Only" = voter_outcomes_economic_only_model
+      )
+    )
+model_summary
+```
+
+@tbl-R-squared-estimates shows that the $R^2$ for the main model is 0.458 while the $R^2$ for the demographic only model and economic only model is 0.104 and 0.383 respectively. This shows that the demographic only model's fit is significantly less than our final model's, showing that considering economic variables in the analysis significantly boosted model fit. 
+
+When we look at the model with only economic variables, we find that a good amount of variation in model is explained by these 2 variables, evidenced by the comparatively high $R^2$ of 0.383. The model though lacks some interpretability and can be improved by considering the demographic variables on top. This leads us back to our main model, with the highest $R^2$ between the 3.
+
+# Discussion
+
+## Demographic Characteristics Effect on Voter Preference
+
+In this paper we examined how race, education, gender, economic outlook and change in income impacted voters’ preferences for Biden over Trump in the 2020 US presidential election. Our analysis showed that Biden voters thought the nation's economy got much worse. Furthermore, voters that supported Biden were female, Black, Hispanic, and Asian. They possessed a minimum of a four-year college degree or higher. Finally, they were white and non-white college graduates as well as non-white without a four-year college degree. Overall, Biden voters were women, more racially diverse with greater education attainment.
+
+Our data and other research we conducted on education as well as education by race was consistent. There were a few discrepancies in the data we analyzed and previous research with regards to gender and race. 
+
+First, voters’ gender on voting preferences were contradictory. Our data demonstrated a greater percent of women voted for Biden whereas [@citeIgielnik] points out that Biden received more votes from men. A plausible explanation for this difference is a small difference in gender preferences. Further research should be done as well as observing previous election results to determine whether voters' gender really is a reliable predictor of voting preferences in US elections.
+
+Secondly, our data on race was congruent with Whites, Blacks and Asians. Our data indicated Hispanics voted for Biden however other research suggests Hispanics were more inclined to vote for Trump. Another incongruence involves the 'other' race category in that our data signifies the other group voted Trump however research alludes this group as being Biden supporters. A possible reason for this inconsistency is that in our data, the other category consists of only three percent of electorates and Hispanics ten percent. Having such a small representation of these groups increases the likelihood of discrepancies in results.
+
+## Economic Characteristics Effect on Voter Preference
+
+Perhaps the strongest effect on voting preference, was through the economic outlook variable. The coefficients were on orders of magnitude 2-3 times larger than the coefficients for the other variables. This indicates the prevalence of a poor economy sentiment among majority of the voter base. This also shows that the prevelance of a weak economy during the pandemic influenced the political preferences of voters and shifted a large amount of the populace in favor of Biden.
+
+This, coupled with the fact that a majority of voters who saw their incomes reduce favored Biden, alludes to the possibility that a weak economy during election season prompted an anti-incumbency sentiment amongst many voters, influencing them to vote for Biden.
+
+The effect of both these variables on voting preference for Biden is interesting because, for one, they had the strongest combined effect, and also are characteristics which aren't easily predictable based of a voters demographics. Also, when we ran our regression with only these 2 variables, they had better predictive power than the model with only the demographic variables involved. Therefore, economic characteristics may be the key to understanding voter preferences, and combined with demographic characteristics, tell a compelling story of voter outcomes.
+ 
+## Weaknesses 
+
+A major weakness of our analysis is assuming a linear model for voting preferences as a function of demographic and economic characteristics. Assuming linearity hids a lot about the mechanism through which these characteristics influence voting outcomes. Though model interpretability is increased, we lose any sound understanding of the mechanism underlying the phenomenon that we aim to model.
+
+## Next steps 
+ 
+Despite taking place during COVID-19, the 2020 election showed the highest turnout in the 21st century, where 66.8% of eligible voters voted. This is up from 60.1% in the previous election in 2016, most likely due to the addition of nontraditional methods of voting such as early voting and mailing ballots to ensure adequate voter turnout [@citeFabina]. A potential probe is looking at the demographics behind those that voted by mail, absentee, early or on the traditional day. For example, [@citeIgielnik] states Hispanic and whites voted by mail whereas blacks voted early in person.
+
+A possible area of additional research could question the correlation between voters’ race and the race of the candidate they vote for. For instance, investigating the different demographics that voted for Biden, a white male candidate compared to his running mate, Kamala Harris a black female candidate. Additionally, white respondents who showed high levels of radical resentment were more likely to vote for Joe Biden as opposed to Kamala Harris. Not only was Harris at a disadvantage because of her race but also because of her gender. [@citeNelson] states that “hostile sexism” may play a role in Harris’s success in the election (2021). The combination of these two variables could lead to interesting findings.
+
+Additional research could look in the direction of age as a predictor in the US election. [@citeLees], with the use of 1000 research participants through a multi-step design, finds voters aged 49 and younger were in support of Biden whereas the older population favored Trump, however, not by a significant amount. Another trend portrayed the insignificance of candidates age on voter preference. Young adults aged 30 and below indicated that voting for a candidate that is over the age of 70 did not change their voting decision. At the time of the election, both Biden and trump were over the age of 70 [@citeLees]. Thus further research is necessary to determine the reliable relationship between age and voting preferences.
+
+
+\newpage
+
+# References
+
+
