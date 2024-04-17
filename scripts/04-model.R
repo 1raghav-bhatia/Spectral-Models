@@ -1,127 +1,70 @@
 #### Preamble ####
-# Purpose: To create the logistic regression model.
-# Author: Carl Fernandes, Lexi knight, Raghav Bhatia 
-# Date: 12 March 2024
+# Purpose: To model the relationship between short-term market fluctuations and VIX.
+# Author: Raghav Bhatia
+# Date: 16 April 2024
 # Contact: raghav.bhatia@mail.utoronto.ca
 # License: MIT
-# Pre-requisites: Have the cleaned dataset.
-# Any other information needed?
-
+# Pre-requisites: Have the cleaned dataset of detailed coefficients.
 
 #### Workspace setup ####
-library(boot)
-library(broom.mixed)
-library(collapse)
-library(dataverse)
-library(gutenbergr)
-library(janitor)
-library(knitr)
-library(marginaleffects)
-library(modelsummary)
 library(rstanarm)
-library(tidybayes)
-library(tidyverse)
+library(broom)
+library(broom.mixed)
+library(modelsummary)
 library(arrow)
+library(ggplot2)
 
 #### Read data ####
-ces2020_data <- read_parquet("data/cleaned_data/ces2020_cleaned/part-0.parquet")
+detailed_coefficient_vix <- 
+  arrow::read_parquet("data/cleaned_data/detail_coefficients_vix.parquet")
+detailed_coeffs_mkt_shocks <- 
+  arrow::read_parquet("data/cleaned_data/detail_coefficients_market_shock.parquet")
+detailed_coeffs_df <- 
+  cbind(detailed_coefficient_vix[1:185,], detailed_coeffs_mkt_shocks[1:185,])
 
 ### Mathematical Model ###
 
 ## \begin{align*}
-
-##  y_i|\pi_i &\sim \mbox{Bern}(\pi_i) \\
-##  \mbox{logit(}\pi_i\mbox{) } &=  \beta_0 \, + \, \beta_1 \cdot \text{gender}_i \,
-##  + \, \beta_2 \cdot \mbox{education}_i \, +  \, \beta_3 \cdot \mbox{race}_i \\
-##  &\quad \, + \, \beta_4 \cdot \mbox{economic outlook}_i \,
-##  + \, \beta_5 \cdot \mbox{income change}_i \\
-##  \beta_0 &\sim \mbox{Normal}(0, 2.5) \\
-##  \beta_1 &\sim \mbox{Normal}(0, 2.5) \\
-##  \beta_2 &\sim \mbox{Normal}(0, 2.5) \\
-##  \beta_3 &\sim \mbox{Normal}(0, 2.5) \\
-##  \beta_4 &\sim \mbox{Normal}(0, 2.5) \\
-##  \beta_5 &\sim \mbox{Normal}(0, 2.5) \\
-  
-##  \end{align*}
-
+##  y_i &\sim N(\mu_i, \sigma^2) \\
+##  \mu_i &= \beta_0 + \beta_1 \cdot \text{Market\_Return\_Detail}_i \\
+##  \beta_0 &\sim N(0, 10) \\
+##  \beta_1 &\sim N(0, 10) \\
+##  \sigma &\sim \text{Exponential}(1)
+## \end{align*}
 
 ### Model data ####
 
-## The example considers a sliced sample to improve the runtime of the model.
+## GLM for VIX based on Market Return Details
+market_shock_regression <- stan_glm(
+  VIX_Detail ~ Market_Return_Detail,
+  data = detailed_coeffs_df, 
+  family = gaussian(),  # Assuming normal distribution of errors
+  prior = normal(0, autoscale = TRUE),  # Normal prior with autoscaling
+  chains = 4, iter = 2000
+)
 
-set.seed(853)
+## Summary and diagnostics
+summary(market_shock_regression)
+modelsummary(market_shock_regression)
 
-ces2020_data_reduced <- 
-  ces2020_data |> 
-  slice_sample(n = 2000)
+## Plot results
+p <- ggplot(detailed_coeffs_df, aes(x = Market_Return_Detail, y = VIX_Detail)) +
+  geom_point(alpha = 0.6, color = "blue", size = 3) +
+  geom_smooth(method = "glm", method.args = list(family = gaussian()), 
+              se = TRUE, color = "red", fill = "pink") +
+  labs(title = "Regression of VIX on Market Return Details",
+       x = "Market Return Detail Coefficients",
+       y = "VIX Detail Coefficients",
+       caption = "Data Source: Detailed Coefficients from Financial Models") +
+  theme_minimal() +
+  theme(text = element_text(size = 12),
+        plot.title = element_text(face = "bold", hjust = 0.5),
+        plot.caption = element_text(hjust = 0, color = "grey50"))
 
-## Voter Outcomes Demographic Only Model
-
-# This glm regresses voting outcome on only demographic variables to test their
-# fit
-
-voter_outcomes_demographic_only <-
-  stan_glm(
-    voted_for ~ gender + education + race,
-    data = ces2020_data_reduced,
-    family = binomial(link = "logit"),
-    prior = normal(location = 0, scale = 2.5, autoscale = TRUE),
-    prior_intercept = 
-      normal(location = 0, scale = 2.5, autoscale = TRUE),
-    seed = 853
-  )
-
-## Voter Outcomes Economic Only Model
-
-# This glm regresses voting outcome on only economic variables to test their
-# fit
-
-voter_outcomes_economic_only <-
-  stan_glm(
-    voted_for ~ economic_outlook + income_change,
-    data = ces2020_data_reduced,
-    family = binomial(link = "logit"),
-    prior = normal(location = 0, scale = 2.5, autoscale = TRUE),
-    prior_intercept = 
-      normal(location = 0, scale = 2.5, autoscale = TRUE),
-    seed = 853
-  )
-
-## Final Model
-
-set.seed(853)
-
-ces2020_data_sample <- 
-  ces2020_data |> 
-  slice_sample(n = 10000)
-
-voter_outcomes_final <-
-  stan_glm(
-    voted_for ~ gender + education + race + economic_outlook + income_change,
-    data = ces2020_data_sample,
-    family = binomial(link = "logit"),
-    prior = normal(location = 0, scale = 2.5, autoscale = TRUE),
-    prior_intercept = 
-      normal(location = 0, scale = 2.5, autoscale = TRUE),
-    seed = 853
-  )
+print(p)
 
 #### Save model ####
+saveRDS(market_shock_regression, file = "models/market_shock_regression.rds")
 
-saveRDS(
-  voter_outcomes_demographic_only,
-  file = "models/voter_outcomes_demographic_only.rds"
-)
-
-saveRDS(
-  voter_outcomes_economic_only,
-  file = "models/voter_outcomes_economic_only.rds"
-)
-
-
-saveRDS(
-  voter_outcomes_final,
-  file = "models/voter_outcomes_final.rds"
-)
 
 

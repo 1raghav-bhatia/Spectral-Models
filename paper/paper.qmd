@@ -2,11 +2,9 @@
 title: "Voting Patterns Unveiled"
 subtitle: "The Impact of Demographics and Economic Outlook in the 2020 Election"
 author: 
-  - Carl Fernandes
-  - Lexi Knight
   - Raghav Bhatia
-thanks: "Code and data are available at: https://github.com/1raghav-bhatia/Voter-Outcomes.git"
-date: March 12, 2024
+thanks: "Code and data are available at: https://github.com/1raghav-bhatia/Spectral-Models.git"
+date: April 16, 2024
 date-format: long
 abstract: "This paper investigates voter demographics and economic outlook on preferences for candidates in the 2020 US presidential election. It was found that race and education played pivotal roles in determining support for Biden over Trump. Moreover, economic factors influenced voter sentiment with perceptions of economic hardship impacting candidate favorability. Awareness of these complex dynamics is imperative for grasping the landscape of American politics especially with the upcoming US election this November."
 toc: true
@@ -20,32 +18,27 @@ bibliography: references.bib
 #| warning: false
 #| message: false
 
-library(boot)
-library(broom.mixed)
-library(collapse)
-library(dataverse)
-library(janitor)
 library(knitr)
-library(marginaleffects)
 library(modelsummary)
 library(rstanarm)
 library(tidyverse)
 library(readr)
-library(here)
-library(kableExtra)
 library(arrow)
+library(knitr)
+library(quantmod)
+library(forecast)
+library(wavethresh)
+library(kableExtra)
 
-### Reading the Data ###
+### Reading the raw data ###
 
-ces2020_data <- read_parquet("data/cleaned_data/ces2020_cleaned/part-0.parquet")
+sp500_raw <- arrow::read_parquet("data/raw_data/sp500_data.parquet")
+vix_raw <- arrow::read_parquet("data/raw_data/vix_data.parquet")
+
+### Reading the cleaned Data ###
+
 
 ### Reading the Model ###
-
-voter_outcomes_model <- readRDS(file = here("models/voter_outcomes_final.rds"))
-voter_outcomes_demographic_only_model <- readRDS(
-                                file = here("models/voter_outcomes_demographic_only.rds"))
-voter_outcomes_economic_only_model <- readRDS(
-                                file = here("models/voter_outcomes_economic_only.rds"))
 
 ```
 
@@ -65,237 +58,158 @@ By bridging the gap between theoretical finance and empirical evidence, this res
 
 # Data {#sec-data}
 
-The analysis is based on the Cooperative Election Study (CES), from 2020 which contains a wealth of data on voter registration, preferences, demographics, and various opinions on national issues. The coding language and associated packages used are `R` [@citeR], the `tidyverse` [@Rpackage_tidyverse], `boot`[@Rpackage_boot], `broom.mixed` [@Rpackage_broom_mixed], `collapse`[@Rpackage_collapse] ,`dataverse` [@Rpackage_dataverse], `arrow` [@Rpackage_arrow], `rstanarm` [@Rpackage_rstanarm], `knitr` [@Rpackage_knitr], `janitor` [@Rpackage_janitor], `marginaleffects` [@Rpackage_marginaleffects], `here` [@Rpackage_here], and `modelsummary` [@Rpackage_modelsummary], `readr` [@Rpackage_readr] and `Kable Extra` [@Rpackage_kableExtra].The CES was conducted during a time of increased political activity and social discussions in the United States, providing a snapshot of the electorate during the 2020 Presidential election—a year marked by significant social and economic changes.
+## Data Source and Preparation
 
-This dataset is notable for its extensive coverage across geographical regions and the depth of topics covered. With over 60,000 respondents it offers a broadened perspective on voters, allowing for detailed examination of voter behavior and preferences beyond just party affiliations. It delves into the details of voter demographics and their nuanced views on matters.
+This research utilizes publicly available financial data for the Standard & Poor's 500 Index (S&P 500) and the Chicago Board Options Exchange Volatility Index (VIX), sourced from Yahoo Finance. The choice of Yahoo Finance as a data source is driven by its comprehensive coverage and reliable historical financial data accessibility, which is crucial for the integrity of time-series analysis in financial research. The data covers a period from January 1993 to December 2023 for the S&P 500 and from March 1993 to February 2024 for the VIX.
 
-The main goal of utilizing this dataset is to understand how conditions around the 2020 election influenced voter preferences. The analysis focuses on determining whether individuals’ views on economics and personal financial situations played a role in their decision between President Trump and former Vice President Biden. The emphasis on how economic factors influence voting patterns becomes crucial considering the economic conditions experienced in 2020 marked by significant changes triggered by the impact of the COVID 19 outbreak.
+The specific variables extracted from these datasets are the daily closing prices, which are essential for calculating monthly returns and analyzing market behavior over the study period. This selection is informed by the closing price's relevance in reflecting the final market consensus on value for each day, making it a critical indicator for financial analysis.
 
-## Description of Variables and Context
+While alternative sources such as Google Finance or Bloomberg could provide similar data, Yahoo Finance was selected due to its ease of integration with the quantmod [@quantmod] package in R, which significantly simplifies the process of data fetching and preliminary handling. Furthermore, Yahoo Finance offers unrestricted access to historical data, unlike some other services that might require subscriptions.
 
-### Voter Registration (votereg)
+The data retrieval and initial processing were conducted using the quantmod package in R, which is instrumental for financial modeling and time series analysis due to its capabilities in fetching and handling various financial data formats.
 
-The variable `votereg` indicates if participants are registered to vote. Being registered to vote is an important indicator of political involvement and a necessary step for taking part in elections. This variable plays a role in filtering the data to focus on those who vote, ensuring that subsequent analyses accurately represent the behaviors and preferences of real participants in the voting process.
+## Data Cleaning and Transformation
 
-### Preference for Presidential Candidates (voted_for)
-
-The `voted_for` variable shows the choice made by respondents between President Donald Trump and former Vice President Joe Biden in the 2020 election. This distinction offers insights into the political landscape of the United States during that period and acts as a primary measure for studying how other factors impact voter choices.
-
-### Gender (gender)
-
-The recording of `gender` aims to understand the composition of respondents and its potential impact on voting behavior. Gender dynamics often influence preferences and priorities, making this variable significant for our analysis. The equal distribution between female respondents, in this dataset mirrors the overall voting populace allowing for a balanced examination of gender related trends or differences.
-
-### Education Level (educ)
-
-The `educ` category indicates the level of education attained by individuals ranging from "No High School Diploma” to "Postgraduate Degree." Education plays a role in shaping awareness, policy preferences and voting tendencies. Examining the backgrounds of voters can provide insights into the complexity of the electorate and potential relationships between achievements and support for candidates.
-
-### Ethnicity (race)
-
-Ethnicity encompasses an array of identities, such as White, Black, Hispanic, Asian, Native American, Middle Eastern and others. As an aspect of group identity, ethnicity can influence political beliefs and alliances. Analyzing the `race` variable helps in understanding how racial demographics may have influenced leanings in elections given the increased attention to racial issues during the 2020 campaign season.
-
-### Household Income Changes (CC20_303)
-
-The `CC20_303` delves into how individuals have experienced shifts by inquiring about their household’s yearly income changes. It classifies these changes into five levels; "Increased significantly", "Increased", "Remained stable", "Decreased" and "Decreased significantly". Given the fluctuating economic climate impacted by the events of 2020, especially due to the COVID 19 pandemic, these responses hold significant relevance. They offer a foundation to gauge peoples outlook and may be linked to their voting preferences as financial well-being or challenges often play a role in shaping political inclinations.
-
-### National Economic Perception (CC20_302)
-
-The `CC20_302` variable captures people’s views on the economy’s performance. Respondents were asked to assess whether within the year the country’s economy has "Improved markedly " "Improved", "Stayed consistent", "Declined moderately", "Declined significantly " or if they were uncertain about it. This important economic indicator is vital as it could mirror the contentment or discontent of voters with how the current administration's managing economic matters and may play a significant role in their selection of a candidate.
-
-Adding these factors with voter registration and demographic details offers a set of data allowing for a thorough examination of the 2020 U.S. Presidential Election, from various angles. The subsequent investigation will dive into the specifics of these factors, uncovering the intricacies of voters’ views on the economy and how they might impact election results.
- 
-## Alternative Datasets and Justification
-
-Researchers studying elections have access to a variety of datasets, each with its own focus and level of detail. While the American National Election Studies (ANES) and the General Social Survey (GSS) are well regarded for their insights into voter behavior and attitudes, the Cooperative Election Study (CES) from 2020 was chosen for this analysis for several reasons.
-
-The CES dataset is known for its breadth and timeliness, capturing a range of variables directly related to the 2020 election. Unlike ANES and GSS which provide perspectives over extended periods CES offers a view of the political landscape during a critical election year. Its large sample size allows for an examination of voter demographics and behaviors during a time when the U.S. was grappling with social and economic challenges.
-
-On the other hand, while ANES offers longitudinal data it may not offer as much specificity on economic variables crucial to our hypothesis—that voters’ economic perceptions and experiences leading up, to the 2020 election significantly influenced their voting choices. GSS, known for its range, in sciences may not capture the immediacy of economic sentiments as quickly as CES does. 
-
-Furthermore, CES’s methodological strengths lie in its sample size that allows for breakdowns by demographics while still representing a broad cross section of the American public. It delves into nuanced factors such as changes in household income and the national economic outlook, which are crucial to the hypothesis being explored.
-
-When it comes to the dataset construction, CES’s approach to gauging economic perceptions is particularly relevant as it reflects both nationwide trends and individual experiences. It goes beyond asking respondents about their opinions on the economy to inquire about shifts in their own household income creating a direct link between macroeconomic patterns and personal financial situations.
-
-Ultimately selecting CES for this analysis was a decision based on its provision of relevant data that is up to date for investigating the research question at hand. The dataset's emphasis on the 2020 election and incorporation of factors corresponds with our goal to analyze the economic factors that might have impacted voting patterns.
-
-## Data Cleaning and Preparation
-
-Ensuring the accuracy of the analysis involves cleaning and preparing the data. In the case of the 2020 Cooperative Election Study (CES) dataset various steps were taken to improve the quality and dependability of the findings.
-
-### Initial Data Review
-
-The first step was to examine the dataset for any discrepancies, missing data or unusual values that could impact the analysis. This included checking how responses were distributed across variables to confirm they fell within expected ranges and followed the guidelines outlined in the CES codebook.
-
-### Data Cleaning and Modification
-
-Transforming data played a role in preparing it for analysis. Numeric variables were converted into formats for interpretation. For instance:
-
-* The `gender` variable was changed from codes (1, for male, 2, for female) to categories "Male" and "Female." 
-* The variable 'education' was changed from numbers to categories, with labels like "No High School", "High School Graduate", "Some College", "2 Year College", "4 Year College" and "Post Graduate."
-* The factors `CC20_303` and `CC20_302` which represent shifts in household income and views on the economy were converted from values to descriptive categories ensuring each option was labeled meaningfully based on the survey choices.
-
-### Subsetting
-
-The focus of the analysis was on registered voters who expressed a preference for one of the candidates. Therefore the dataset was filtered to include individuals with a `votereg` value of 1 (registered voters) and those whose `CC20_410` values indicated support for either Biden or Trump.
-
-### Handling Missing Data
-
-Entries containing incomplete information were managed appropriately—either through imputation or exclusion depending on the severity and type of missing data. For example if there were a few cases with missing data, for the race variable those instances were excluded to ensure the analysis accuracy.
-
-### Validation and Testing
-
-Throughout the data cleaning process we conducted tests to confirm the changes and ensure that the data followed formats. These tests checked for factor levels, no missing values after imputation and proper application of recording rules.
-
-We meticulously documented the data cleaning and preparation procedures to maintain transparency and reproducibility of our findings.  In summary, by cleaning and preparing the CES dataset we have established a foundation for subsequent analysis. The next section will explore exploratory data analysis where visualizations of cleaned data will be used to uncover patterns and insights to behaviors and economic sentiments of the 2020 American electorate.
-
-## Summary Statistics and Graphical Representation
+Once retrieved, the data was cleaned and transformed into monthly returns to average out the minor fluctuations in day-to-day returns and to capture the significant monthly trends that highlight short-term market fluctuations. This transformation was facilitated by converting daily data into monthly data points, specifically extracting closing prices and calculating the monthly returns. The transformation process employed the xts [@xts] library in R.
 
 ```{r}
 #| echo: false
-#| eval: true
 #| warning: false
 #| message: false
+#| label: tbl-monthly-return-vix
 
-compute_summary_stats <- function(df, var) {
-  stats <- df %>%
-    count(!!sym(var)) %>%
-    rename(Category = !!sym(var)) %>%
-    mutate(Percent = n / sum(n) * 100)
+library(knitr)
+library(kableExtra)
 
-  total <- stats %>% summarize(Category = "Total", n = sum(n), Percent = sum(Percent))
-  stats <- bind_rows(stats, total)
+### Transforming Data to Monthly Returns and Cleaning
+# S&P 500
+sp500_monthly <- to.monthly(sp500_raw, indexAt = "lastof", OHLC = FALSE)
+sp500_returns <- ROC(Cl(sp500_monthly)) * 100  # Convert to percentage returns
+sp500_clean <- na.omit(sp500_returns)  # Remove NAs
 
-  stats
-}
+# VIX
+vix_monthly <- to.monthly(vix_raw, indexAt = "lastof", OHLC = FALSE)
+vix_clean <- ROC(Cl(vix_monthly)) * 100
+vix_clean <- na.omit(vix_clean)
 
+# Assuming sp500_clean and vix_clean are the cleaned monthly returns data
 
-create_count_plot <- function(data, var_name, title_label, fill_colors) {
-  ggplot(data, aes_string(x = var_name, fill = var_name)) +
-    geom_bar() +
-    scale_fill_manual(values = fill_colors) +
-    labs(title = title_label, x = title_label, y = 'Count') +
-    theme_minimal() +
-    theme(axis.text.x = element_text(angle = 45, hjust = 1), legend.position = "bottom") # Rotate x labels for readability and move legend to bottom
-}
+# Combine the two series into one data frame
+combined_data <- data.frame(Date = index(sp500_clean), 
+                            SP500_Returns = coredata(sp500_clean), 
+                            VIX_Returns = coredata(vix_clean))
 
-# Colors for the plots
-gender_colors <- c("Male" = "#1f77b4", "Female" = "#ff7f0e")
-education_colors <- c("No HS" = "#1f77b4", "High school graduate" = "#aec7e8", "Some college" = "#ffbb78", "2-year" = "#2ca02c", "4-year" = "#98df8a", "Post-grad" = "#d62728")
-race_colors <- c("White" = "#1f77b4", "Black" = "#ff7f0e", "Hispanic" = "#2ca02c", "Asian" = "#d62728", "Native American" = "#9467bd", "Middle Eastern" = "#8c564b", "Two or more races" = "#e377c2", "Other" = "#7f7f7f")
-region_colors <- c("Northeast" = "#1f77b4", "Midwest" = "#ff7f0e", "South" = "#2ca02c", "West" = "#d62728")
-marstat_colors <- c("Married" = "#1f77b4", "Separated" = "#ff7f0e", "Divorced" = "#2ca02c", "Widowed" = "#d62728", "Never married" = "#9467bd", "Domestic/civil partnership" = "#8c564b")
-income_colors <- c("Under $30,000" = "#1f77b4", "$30,000 to $49,999" = "#ff7f0e", "$50,000 to $99,999" = "#2ca02c", "$100,000 to $199,999" = "#d62728", "$200,000 or more" = "#9467bd")
+# Ensure the VIX and S&P 500 data are aligned by Date
+combined_data <- na.omit(combined_data)
 
-```
+# Select the first 6 rows to display in the table
+head_data <- head(combined_data, 6) |> select(-Date) |> round(digits = 2)
 
-The summary data from the Cooperative Election Study (CES) 2020 dataset provides an overview of the voter demographics and their economic perspectives.
-
-### Gender Representation
-
-In the dataset there are 24,303 female participants making up around 55.8% of the sample and 19,251 male participants accounting for approximately 44.2%. These numbers reflect trends showing that women tend to be politically engaged and active in voting during recent elections.
-
-```{r}
-#| echo: false
-#| eval: true
-#| warning: false
-#| message: false
-
-gender_stats <- compute_summary_stats(ces2020_data, "gender")
-kable(gender_stats)
-
-# Create and print the graph for 'gender'
-gender_plot <- create_count_plot(ces2020_data, "gender", "Gender", gender_colors)
-print(gender_plot)
-
-```
-
-### Educational Background
-
-The educational profile of respondents is varied with the majority holding a '4 year' college degree (26.4%) followed by high school graduates (22.5%) and individuals with some college education (21.3%). Those with graduate degrees make up 16.7% of the sample while '2 year' college graduates represent 11.4%. Participants without a high school diploma constitute a proportion at 1.6%. This distribution highlights the significance of considering education levels in analysis as they can influence awareness, participation, in civic activities and policy preferences.
-
-```{r}
-#| echo: false
-#| eval: true
-#| warning: false
-#| message: false
-education_stats <- compute_summary_stats(ces2020_data, "education")
-kable(education_stats)
-# Create and print the graph for 'education'
-
-education_plot <- create_count_plot(ces2020_data, "education", "Education Level", education_colors)
-print(education_plot)
+# Use kable from the knitr package to create a nicely formatted table
+kable(head_data, 
+      col.names = c("S&P 500 Monthly Returns (%)", "VIX Monthly Returns (%)"),
+      caption = "Combined S&P 500 and VIX Monthly Returns",
+      align = 'c', # Center align the columns
+      table.attr = "style='width:75%; margin:auto;'") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), 
+                full_width = FALSE, 
+                position = "center")
 
 ```
 
 
-### Race
+## Detailed Analysis of Short-Term Market and VIX Fluctuations
 
-The majority of survey participants are White (76.3%) followed by African individuals at 9.5% and Hispanic or Latino respondents at 7%. A smaller portion of the group includes individuals (2.6%) those of 'Two or more races' (1.7%) Eastern individuals (1.7%) and Native Americans (0.7%). The presence of various  ethnic backgrounds among voters highlights the importance of considering how race, policy issues and voting patterns intersect.
+To understand the relationship between short-term market fluctuations and future short-term volatility expectations as represented by the VIX, the analysis began with fitting an ARIMA (AutoRegressive Integrated Moving Average) model to the S&P 500 return data. The ARIMA model is utilized to forecast future values based on past values of a time series and its lags. In this context, the residuals from the ARIMA model—representing unexpected values or shocks in the market—were of particular interest. These residuals signify deviations from the expected trend and cyclical components, effectively isolating the pure shock elements in the market returns, which are crucial for understanding reactionary market behaviors.
 
-```{r}
-#| echo: false
-#| eval: true
-#| warning: false
-#| message: false
+### ARIMA Model for Market Returns
 
-race_stats <- compute_summary_stats(ces2020_data, "race")
-kable(race_stats)
-race_plot <- create_count_plot(ces2020_data, "race", "Race", race_colors)
-print(race_plot)
-```
-
-### National Economic Sentiment
-
-When it comes to perceptions of the economy a large percentage of respondents feel that the economy has either "Gotten worse" (41.4%) or "Gotten somewhat worse" (27.3%). Those who believe it has "Stayed about the same" make up 8.9% of participants while a smaller percentage think it has "Gotten somewhat better" (10.2%) or Gotten much better" (8.2%). A small fraction is uncertain about the outlook with 3.9% stating they are "Not sure". These findings suggest a view towards national economic conditions, during the election year which could impact voter decisions.
+The ARIMA model was chosen for its ability to model various types of time series with trends and seasonalities effectively. By analyzing the residuals, we can identify the short-term shocks in market returns, which are not explained by the model's fitted values. These shocks are essential for analyzing how unexpected changes in market returns might influence future market conditions.
 
 ```{r}
 #| echo: false
-#| eval: true
 #| warning: false
 #| message: false
+#| label: fig-monthly-return-fitted
+#| fig-cap: Fitted Values of the Arima Model 
 
-economic_outlook <- compute_summary_stats(ces2020_data, "economic_outlook")
-kable(economic_outlook)
+# Fit ARIMA model on S&P 500 monthly returns
+
+arima_sp500 <- auto.arima(sp500_clean)
+
+# Plot the original data and the fitted model
+
+plot(monthly_returns, main="Fitted ARIMA Model", col="blue")
+lines(fitted(arima_model), col="red")
+legend("topright", legend=c("Actual", "Fitted"), col=c("blue", "red"), lty=1)
+
 ```
 
-### Change in Household Income
 
-People's experiences with changes in household income over the years vary widely. 31.2% mentioned that their income remained relatively stable while 18.3% saw a decrease and 10% noticed a slight increase. A smaller percentage, 10% faced a decrease while only 3.7% reported a substantial increase. These individual financial shifts could have effects on voting decisions in an election marked by economic uncertainty.
-These summarized figures provide a glimpse into the economic landscape of the dataset offering context, for understanding the outcomes of the 2020 election. The forthcoming analysis will explore how these elements might have influenced voting behavior in detail.
+### Discrete Haar Transform for Decomposition
+
+For both the market return shocks and the VIX data, a Discrete Haar Transform (DHT) was applied to further analyze these time series. The DHT is particularly suited for this analysis because it decomposes the time series data into levels of detail that correspond to different time scales. In our case, the focus is on capturing fluctuations that span up to 2 months, aligning with our definition of short-term fluctuations.We use the 'wavethresh' [@wavethresh] package for this.
+
+The transformation process through DHT breaks down the original time series into a series of approximations and details. The approximations represent the smoothed-out trends, while the details capture the finer nuances of the data at various intervals. For this study, the first level detail coefficients (Detail 1) were extracted, as they represent the highest resolution of short-term fluctuations accessible from the transform, corresponding to a bi-monthly frequency. This choice aligns with our interest in understanding the immediate impacts within a two-month period, considered a critical timeframe for reactive market behaviors.
+
+
+
+### Decomposition of Residuals and VIX
+
+Similarly, the VIX data underwent DHT to isolate its short-term components. By focusing on the same level of detail as the market returns, we ensure a consistent basis for comparison. The Detail 1 coefficients from the VIX transformation provide a mirrored view of how volatility expectations, as captured by the VIX, respond in the short term, potentially influenced by the market shocks identified from the S&P 500 residuals.
 
 ```{r}
 #| echo: false
-#| eval: true
 #| warning: false
 #| message: false
+#| label: fig-decomposed-return-VIX
+#| fig-cap: Short Term Fluctuations in Market Shocks and VIX
 
-income_change <- compute_summary_stats(ces2020_data, "income_change")
-kable(income_change)
+
+# Apply Discrete Haar Transform to ARIMA residuals
+dht_residuals <- dwt(residuals(arima_sp500), filter = "haar", boundary = "periodic")
+details_residuals <- dht_residuals@W
+
+# VIX data analysis using DHT
+vix_data_vector <- coredata(vix_clean)
+vix_dht <- dwt(vix_data_vector, filter = "haar", boundary = "periodic")
+details_vix <- vix_dht@W
+
+# Plotting detailed coefficients of residuals
+par(mfrow = c(2, 2))
+plot(details_residuals[[1]], type = 'l', 
+     main = paste("Detail Residuals at Level", 1),
+     xlab = "Coefficients", 
+     ylab = "Detail 1 Residuals")
+plot(details_vix[[1]], type = 'l', 
+     main = paste("Detail VIX at Level", 1),
+     xlab = "Coefficients", 
+     ylab = "Detail 1 VIX")
+
 ```
 
-## Measurement
 
-Measuring variables in a dataset is crucial for ensuring the reliability and accuracy of research results. In the Cooperative Election Study (CES) 2020 important concepts like outlook, personal income changes, gender, education level and race were defined through crafted survey questions. These questions aimed to capture the characteristics and perspectives of the electorate.
+This detailed decomposition allows us to trace the direct and immediate impacts of market shocks on future volatility expectations, offering insights into the behavioral dynamics of market participants. The analysis of these coefficients in the next section is aimed at exploring whether short-term shocks in the market have a predictive power over short-term shifts in volatility expectations, challenging the conventional wisdom suggested by the efficient market hypothesis.
 
-### Defining Key Terms
+## Measurement of Short-Term Market Fluctuations and Volatility Expectations
 
- Economic Outlook (National Economics. CC20_302): Survey participants were asked to evaluate whether they believed the national economy had improved or worsened in the year. Their responses were rated on a six point scale from "Gotten much better" to "Gotten much worse " with an option for "Not sure." This measure reflects perceptions of conditions rather than objective economic data.
- 
- Household Income Changes (CC20_303): This factor assesses how respondents view changes in their household incomes over the year. Using a five point scale from "Increased a lot" to "Decreased a lot " it captures both negative shifts in situations. This measure offers insights into voters' direct experiences.
- 
-  Gender: Participants identified themselves as either "Male" or "Female” in a manner. Understanding gender in this way is crucial for delving into how gender dynamics impact preferences and voting behavior.
-  
- Education Level: The educational background of respondents was divided into six categories ranging from "No HS" to "Post grad " enabling an analysis of the relationship between education and various aspects such as beliefs, economic viewpoints and candidate preferences.
- 
- Race and Ethnicity: Respondents self-reported their race and ethnicity which were then categorized into groups like "White " "Black," "Hispanic," "" "Native American " "Middle Eastern " and those identifying with multiple races. This categorization is essential for exploring the influence of ethnic diversity on voting trends.
+### Quantifying Short-Term Market Fluctuations
 
-### Considerations for Measurement
+Short-term market fluctuations in the S&P 500 index are fundamental indicators of transient market behaviors that can provide insights into investor sentiment and market dynamics. These fluctuations are measured using the monthly returns derived from daily closing prices sourced from Yahoo Finance. The transformation from raw daily prices to monthly returns involves calculating the percentage change in closing prices at the end of each month. This approach smooths out day-to-day volatility, focusing on significant monthly changes which better represent short-term market trends.
 
-The subjective nature of variables can lead to response biases since individual perceptions are shaped by experiences, media exposure and political affiliations. However, relying on self reported data offers insights into the electorate's mindset that objective data alone may not fully capture. The way education and race were measured in the study followed standards to ensure consistency with other research and data sets. However it's important to recognize that there can be experiences, within these broad categories, which calls for a thoughtful analysis of the findings.
+The ARIMA (AutoRegressive Integrated Moving Average) model plays a pivotal role in this analysis by fitting these monthly returns to forecast future values and, crucially, to extract the residuals. In econometrics, residuals from such models represent the unexpected component of returns, which can be interpreted as the short-term shocks or the novel information arriving in the market during that month. These residuals are what we define as the "short-term market fluctuations." By focusing on residuals, we directly measure the impact of new information on market behavior, excluding the predictable component based on past data.
 
-In general, the methods used to measure variables in the CES 2020 dataset allow for an exploration of voter demographics. While understanding the limitations of self reported data the datasets structure supports an examination of how factors economic views and voting patterns intersect. The thorough measurement approach sets a foundation for analyses offering a dependable framework for uncovering meaningful insights, into the dynamics of the 2020 Presidential election.
+### Measuring Future Short-Term Volatility Expectations
 
+Future short-term volatility expectations are captured through the VIX index, often referred to as the market's "fear gauge." The VIX index is designed to measure the stock market's expectation of volatility over the coming 30 days, computed from the option prices of the S&P 500 index. For our analysis, similar to the S&P 500 data, we sourced daily VIX data from Yahoo Finance, which we then processed into monthly averages to align with our market return data.
 
+To specifically measure future expectations as influenced by current market conditions, we applied the Discrete Haar Transform (DHT) to both the residuals of the S&P 500 returns and the VIX data. The DHT helps in decomposing these time series into various levels of detail, reflecting different time scales of volatility. The first level detail coefficients from this transformation represent the highest frequency components available in our monthly data, corresponding to movements within a two-month window. These coefficients capture the essence of rapid changes in volatility and are used to represent the short-term future volatility expectations.
 
+### Methodological Justification and Application
+
+The choice of the ARIMA model for analyzing S&P 500 returns and the application of DHT on both S&P 500 and VIX indices are rooted in financial econometrics, where the objective is to distill raw financial data into actionable insights about underlying market behaviors. This measurement approach ensures that our study accurately reflects the transient phenomena occurring in the financial markets and how they translate into entries in our dataset. By capturing and quantifying these short-term dynamics, we can explore their predictive power on future market conditions.
+
+In summary, our measurement techniques are meticulously designed to transform high-frequency financial market data into a structured format that captures essential dynamics at a monthly frequency. This enables a rigorous examination of the relationship between short-term market shocks and future volatility expectations, providing a robust framework for understanding and forecasting market behavior.
 
 # Model
 

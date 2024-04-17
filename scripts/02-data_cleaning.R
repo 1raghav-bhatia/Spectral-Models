@@ -28,7 +28,7 @@ sp500_clean <- na.omit(sp500_returns)  # Remove NAs
 
 # VIX
 vix_monthly <- to.monthly(vix_raw, indexAt = "lastof", OHLC = FALSE)
-vix_clean <- ROC(Cl(vix_monthly)) * 100
+vix_clean <- Cl(vix_monthly)
 vix_clean <- na.omit(vix_clean)
 
 ### Analyzing Data
