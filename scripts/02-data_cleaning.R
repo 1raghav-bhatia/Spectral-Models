@@ -66,7 +66,9 @@ for (i in 1:7) {
 details_market_df <- data.frame(Market_Return_Detail = details_residuals[[1]]) |> round(digits = 3)
 details_vix_df <- data.frame(VIX_Detail = details_vix[[1]]) |> round(digits = 3)
 
-arrow::write_parquet(details_market_df, "detail_coefficients_market_shock.parquet")
-arrow::write_parquet(details_vix_df, "detail_coefficients_vix.parquet")
+arrow::write_parquet(details_market_df, 
+                     "data/cleaned_data/detail_coefficients_market_shock.parquet")
+arrow::write_parquet(details_vix_df, 
+                     "data/cleaned_data/detail_coefficients_vix.parquet")
 
 
