@@ -1,12 +1,12 @@
 ---
-title: "Voting Patterns Unveiled"
-subtitle: "The Impact of Demographics and Economic Outlook in the 2020 Election"
+title: "Beyond Efficient Markets: Unveiling the Predictive Power of Short-Term Market Shocks"
+subtitle: "How Short-Term Market Dynamics Forecast Future Risks"
 author: 
   - Raghav Bhatia
 thanks: "Code and data are available at: https://github.com/1raghav-bhatia/Spectral-Models.git"
 date: April 16, 2024
 date-format: long
-abstract: "This paper investigates voter demographics and economic outlook on preferences for candidates in the 2020 US presidential election. It was found that race and education played pivotal roles in determining support for Biden over Trump. Moreover, economic factors influenced voter sentiment with perceptions of economic hardship impacting candidate favorability. Awareness of these complex dynamics is imperative for grasping the landscape of American politics especially with the upcoming US election this November."
+abstract: "This study investigates the predictive power of short-term market shocks on future market volatility, specifically focusing on a two-month forecast horizon using the Standard & Poor's 500 index and the Volatility Index (VIX). By employing Discrete Haar Transform (DHT) for data analysis and constructing a Generalized Linear Model (GLM), we analyzed the relationship between current market returns and forward-looking volatility expectations. Our findings reveal a statistically significant correlation where negative market shocks are predictive of increased volatility, suggesting a robust challenge to the Efficient Market Hypothesis. This research provides insight for anticipating future market conditions, highlighting the need for further exploration into the behavioral biases that influence market dynamics."
 toc: true
 format: pdf
 number-sections: true
@@ -19,7 +19,6 @@ bibliography: references.bib
 #| message: false
 
 library(knitr)
-library(modelsummary)
 library(rstanarm)
 library(tidyverse)
 library(readr)
@@ -29,17 +28,27 @@ library(quantmod)
 library(forecast)
 library(wavethresh)
 library(kableExtra)
+library(here)
+library(ggplot2)
+library(gridExtra)
 
 ### Reading the raw data ###
 
 sp500_raw <- arrow::read_parquet("data/raw_data/sp500_data.parquet")
 vix_raw <- arrow::read_parquet("data/raw_data/vix_data.parquet")
 
-### Reading the cleaned Data ###
-
+#### Read data ####
+#### Read data ####
+detailed_coefficient_vix <- 
+  arrow::read_parquet("data/cleaned_data/detail_coefficients_vix.parquet")
+detailed_coeffs_mkt_shocks <- 
+  arrow::read_parquet("data/cleaned_data/detail_coefficients_market_shock.parquet")
+detailed_coeffs_df <- 
+  cbind(detailed_coefficient_vix[1:185,], detailed_coeffs_mkt_shocks[1:185,])
 
 ### Reading the Model ###
 
+market_shock_model <- readRDS(file = here("models/market_shock_regression.rds"))
 ```
 
 
@@ -64,7 +73,7 @@ This research utilizes publicly available financial data for the Standard & Poor
 
 The specific variables extracted from these datasets are the daily closing prices, which are essential for calculating monthly returns and analyzing market behavior over the study period. This selection is informed by the closing price's relevance in reflecting the final market consensus on value for each day, making it a critical indicator for financial analysis.
 
-While alternative sources such as Google Finance or Bloomberg could provide similar data, Yahoo Finance was selected due to its ease of integration with the quantmod [@quantmod] package in R, which significantly simplifies the process of data fetching and preliminary handling. Furthermore, Yahoo Finance offers unrestricted access to historical data, unlike some other services that might require subscriptions.
+While alternative sources such as Google Finance or Bloomberg could provide similar data, Yahoo Finance was selected due to its ease of integration with the quantmod [@quantmod] package in R [@citeR], which significantly simplifies the process of data fetching and preliminary handling. Furthermore, Yahoo Finance offers unrestricted access to historical data, unlike some other services that might require subscriptions.
 
 The data retrieval and initial processing were conducted using the quantmod package in R, which is instrumental for financial modeling and time series analysis due to its capabilities in fetching and handling various financial data formats.
 
@@ -77,6 +86,7 @@ Once retrieved, the data was cleaned and transformed into monthly returns to ave
 #| warning: false
 #| message: false
 #| label: tbl-monthly-return-vix
+#| tbl-cap: "S&P 500 Monthly Returns and VIX Monthly Values"
 
 library(knitr)
 library(kableExtra)
@@ -103,12 +113,11 @@ combined_data <- data.frame(Date = index(sp500_clean),
 combined_data <- na.omit(combined_data)
 
 # Select the first 6 rows to display in the table
-head_data <- head(combined_data, 6) |> select(-Date) |> round(digits = 2)
+head_data <- combined_data[1:6, 2:3] |> round(digits = 2)
 
 # Use kable from the knitr package to create a nicely formatted table
 kable(head_data, 
-      col.names = c("S&P 500 Monthly Returns (%)", "VIX Monthly Returns (%)"),
-      caption = "Combined S&P 500 and VIX Monthly Returns",
+      col.names = c("S&P 500 Monthly Returns (%)", "VIX Index Values"),
       align = 'c', # Center align the columns
       table.attr = "style='width:75%; margin:auto;'") %>%
   kable_styling(bootstrap_options = c("striped", "hover", "condensed"), 
@@ -124,7 +133,7 @@ To understand the relationship between short-term market fluctuations and future
 
 ### ARIMA Model for Market Returns
 
-The ARIMA model was chosen for its ability to model various types of time series with trends and seasonalities effectively. By analyzing the residuals, we can identify the short-term shocks in market returns, which are not explained by the model's fitted values. These shocks are essential for analyzing how unexpected changes in market returns might influence future market conditions.
+The ARIMA model was chosen for its ability to model various types of time series with trends and seasonalities effectively. By analyzing the residuals, we can identify the short-term shocks in market returns, which are not explained by the model's fitted values. These shocks are essential for analyzing how unexpected changes in market returns might influence future market conditions. @fig-monthly-return-fitted provides the fitted values for market return.
 
 ```{r}
 #| echo: false
@@ -133,22 +142,28 @@ The ARIMA model was chosen for its ability to model various types of time series
 #| label: fig-monthly-return-fitted
 #| fig-cap: Fitted Values of the Arima Model 
 
+### Transforming Data to Monthly Returns and Cleaning
+# S&P 500
+sp500_monthly <- to.monthly(sp500_raw, indexAt = "lastof", OHLC = FALSE)
+sp500_returns <- ROC(Cl(sp500_monthly)) * 100  # Convert to percentage returns
+sp500_clean <- na.omit(sp500_returns)  # Remove NAs
+
 # Fit ARIMA model on S&P 500 monthly returns
 
 arima_sp500 <- auto.arima(sp500_clean)
 
 # Plot the original data and the fitted model
 
-plot(monthly_returns, main="Fitted ARIMA Model", col="blue")
-lines(fitted(arima_model), col="red")
-legend("topright", legend=c("Actual", "Fitted"), col=c("blue", "red"), lty=1)
+plot(sp500_clean, main="Fitted ARIMA Model", col="blue", ylab="Market Return")
+lines(fitted(arima_sp500), col="red")
+legend("bottomright", legend=c("Actual", "Fitted"), col=c("blue", "red"), lty=1)
 
 ```
 
 
 ### Discrete Haar Transform for Decomposition
 
-For both the market return shocks and the VIX data, a Discrete Haar Transform (DHT) was applied to further analyze these time series. The DHT is particularly suited for this analysis because it decomposes the time series data into levels of detail that correspond to different time scales. In our case, the focus is on capturing fluctuations that span up to 2 months, aligning with our definition of short-term fluctuations.We use the 'wavethresh' [@wavethresh] package for this.
+For both the market return shocks and the VIX data, a Discrete Haar Transform (DHT) was applied to further analyze these time series. The DHT is particularly suited for this analysis because it decomposes the time series data into levels of detail that correspond to different time scales. In our case, the focus is on capturing fluctuations that span up to 2 months, aligning with our definition of short-term fluctuations. We use the 'wavethresh' [@wavethresh] and 'wavelets' [@wavelets] package for this.
 
 The transformation process through DHT breaks down the original time series into a series of approximations and details. The approximations represent the smoothed-out trends, while the details capture the finer nuances of the data at various intervals. For this study, the first level detail coefficients (Detail 1) were extracted, as they represent the highest resolution of short-term fluctuations accessible from the transform, corresponding to a bi-monthly frequency. This choice aligns with our interest in understanding the immediate impacts within a two-month period, considered a critical timeframe for reactive market behaviors.
 
@@ -156,7 +171,7 @@ The transformation process through DHT breaks down the original time series into
 
 ### Decomposition of Residuals and VIX
 
-Similarly, the VIX data underwent DHT to isolate its short-term components. By focusing on the same level of detail as the market returns, we ensure a consistent basis for comparison. The Detail 1 coefficients from the VIX transformation provide a mirrored view of how volatility expectations, as captured by the VIX, respond in the short term, potentially influenced by the market shocks identified from the S&P 500 residuals.
+Similarly, the VIX data underwent DHT to isolate its short-term components. By focusing on the same level of detail as the market returns, we ensure a consistent basis for comparison. The Detail 1 coefficients given in @fig-decomposed-return-VIX from the VIX transformation provide a mirrored view of how volatility expectations, as captured by the VIX, respond in the short term, potentially influenced by the market shocks identified from the S&P 500 residuals. The 'ggplot2' [@ggplot2] and 'gridExtra' [@gridExtra] packages were used to create the tables.
 
 ```{r}
 #| echo: false
@@ -165,6 +180,9 @@ Similarly, the VIX data underwent DHT to isolate its short-term components. By f
 #| label: fig-decomposed-return-VIX
 #| fig-cap: Short Term Fluctuations in Market Shocks and VIX
 
+library(wavelets)
+library(ggplot2)
+library(gridExtra)
 
 # Apply Discrete Haar Transform to ARIMA residuals
 dht_residuals <- dwt(residuals(arima_sp500), filter = "haar", boundary = "periodic")
@@ -175,16 +193,28 @@ vix_data_vector <- coredata(vix_clean)
 vix_dht <- dwt(vix_data_vector, filter = "haar", boundary = "periodic")
 details_vix <- vix_dht@W
 
-# Plotting detailed coefficients of residuals
-par(mfrow = c(2, 2))
-plot(details_residuals[[1]], type = 'l', 
-     main = paste("Detail Residuals at Level", 1),
-     xlab = "Coefficients", 
-     ylab = "Detail 1 Residuals")
-plot(details_vix[[1]], type = 'l', 
-     main = paste("Detail VIX at Level", 1),
-     xlab = "Coefficients", 
-     ylab = "Detail 1 VIX")
+# Convert data to data frames for ggplot
+df_res <- data.frame(Coefficients = seq_along(details_residuals[[1]]), 
+                     Detail_Residuals = details_residuals[[1]])
+
+df_vix <- data.frame(Coefficients = seq_along(details_vix[[1]]), 
+                     Detail_VIX = details_vix[[1]])
+
+# Create the ggplot objects
+plot_res <- ggplot(df_res, aes(x = Coefficients, y = Detail_Residuals)) +
+  geom_line(color = "blue") +
+  labs(title = "Detail Residuals at Level 1", x = "Coefficients", y = "Detail 1 Residuals") +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5))
+
+plot_vix <- ggplot(df_vix, aes(x = Coefficients, y = Detail_VIX)) +
+  geom_line(color = "red") +
+  labs(title = "Detail VIX at Level 1", x = "Coefficients", y = "Detail 1 VIX") +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5))
+
+# Combine the plots side by side
+grid.arrange(plot_res, plot_vix, ncol = 2)
 
 ```
 
@@ -213,212 +243,196 @@ In summary, our measurement techniques are meticulously designed to transform hi
 
 # Model
 
-## Model set-up
+## Theoretical Foundation
 
-In this section, we frame the estimand in terms of a logistic regression model and subsequently use the model to find relationships between the response variable and input variables. We first specify the model and then justify its appropriateness to conduct the analysis. 
+This study employs a generalized linear model (GLM) to explore the predictive relationship between short-term market return fluctuations and future market volatility expectations as measured by the VIX, lagged by two months. The use of a GLM is particularly advantageous in this context due to its ability to model linear relationships even with data exhibiting volatility clustering—a common characteristic in financial time series.
 
-### Model Specifications ###
+Our hypothesis posits that present short-term market fluctuations, specifically those within a two-month cycle, can provide predictive insights into the market's volatility expectations for the subsequent two months. This investigation into the lagged effects of market returns on perceived future risks is critical for understanding market dynamics that may not adhere strictly to the principles of the efficient market hypothesis. The hypothesis is rooted in the belief that current market conditions, through their short-term fluctuations, exert a measurable influence on the risk perceptions and volatility expectations that are embodied in the VIX two months later.
 
-The model used in this analysis is a multiple logistic regression. The variables along with their distributions are given as below:
+## Model Specifications
 
-\begin{align}
-y_i|\pi_i &\sim \mbox{Bern}(\pi_i) \\
-\text{logit}(\pi_i) &=  \beta_0 \, + \, \beta_1 \times \text{gender}_i 
-\, + \, \beta_2 \times \text{education}_i \, +  \, \beta_3 \times \text{race}_i \\
-&\quad \, + \, \beta_4 \times \text{economic outlook}_i \,
-+ \, \beta_5 \times \text{income change}_i \\
-\beta_0 &\sim \text{Normal}(0, 2.5) \\
-\beta_1 &\sim \text{Normal}(0, 2.5) \\
-\beta_2 &\sim \text{Normal}(0, 2.5) \\
-\beta_3 &\sim \text{Normal}(0, 2.5) \\
-\beta_4 &\sim \text{Normal}(0, 2.5) \\
-\beta_5 &\sim \text{Normal}(0, 2.5)
-\end{align} 
+The model employed in this analysis explores the predictive relationship between short-term market return fluctuations and future market volatility expectations. The model is specified as follows:
 
-where:
+\begin{align*}
+  y_i &\sim \mathcal{N}(\mu_i, \sigma^2) \\
+  \mu_i &= \beta_0 + \beta_1 \times \text{{Market Shock}}_i \\
+  \beta_0 &\sim \mathcal{N}(0, 10) \\
+  \beta_1 &\sim \mathcal{N}(0, 10) \\
+  \sigma &\sim \text{{Exponential}}(1)
+\end{align*}
 
-1. $y_i$ takes the value 1 if the respondent voted Biden and 0 if they voted Trump
-2. $\pi_i$ is the conditional probability of voting for Biden given respondent $i$
-3. $\mbox{Bern}(\pi_i)$ is the Bernoulli Distribution with parameter $\pi_i$
-4. $logit(x)$ is the logit function that maps $(0, 1)$ to $(-\infty, \infty)$
-5. $\text{gender}_i$ is the $i^\text{th}$ respondents gender which takes the value 1 for male and 0 for female
-6. $\text{education}_i$  is the $i^\text{th}$ respondents education level which takes values from 1 to 6 depending on the respondents education level
-7. $\text{race}_i$ is the $i^\text{th}$ respondents race which takes values from 1 to 7 depending on the respondents race
-8. $\text{economic outlook}_i$ is the $i^\text{th}$ respondents view on the economy which takes values on a scale from 1 to 6 depending on the respondents view of the economy
-9.  $\text{income change}_i$ is the $i^\text{th}$ respondents change in income which takes values on a scale from 1 to 5 depending on if the respondents income changed for the worse or better
-10. $\beta_0$ is the intercept of the logistic regression equation
-11. $\beta_1$ is the coefficient of the gender variable
-12. $\beta_2$ is the coefficient of the education variable
-13. $\beta_3$ is the coefficient of the race variable
-14. $\beta_4$ is the coefficient of the economic outlook variable
-15. $\beta_5$ is the coefficient of the income change variable
+Where:
+\begin{itemize}
+  \item \( y_i \) denotes the VIX detail coefficients, modeled as normally distributed with mean \( \mu_i \) and variance \( \sigma^2 \).
+  \item \( \text{{Market Shock}}_i \) represents the detailed coefficients of market returns, treated as the independent variable influencing the VIX.
+  \item \( \beta_0 \) and \( \beta_1 \) are the intercept and slope of the linear regression model respectively.
+  \item \( \mathcal{N}(0, 10) \) indicates that the priors for the regression coefficients are normally distributed with mean 0 and standard deviation 10, reflecting no strong prior beliefs about the magnitude of these parameters.
+  \item \( \text{{Exponential}}(1) \) suggests that the prior variance \( \sigma^2 \) of the VIX detailed coefficients is modeled with an exponential distribution, emphasizing the variability in volatility predictions.
+\end{itemize}
 
-The above model will be used later in the results section to find the impact of the input variables on voter preferences. For now, we justify certain characteristics of the model that capture certain real life aspects of the analysis. 
+This precise mathematical representation facilitates a detailed analysis of the factors that potentially influence market behavior over short intervals. The next section will delve into the justifications for this model's framework, elucidating the theoretical foundations and empirical evidence that support its relevance and effectiveness in analyzing financial market dynamics.
 
-### Model Justification ###
+## Model Justification
 
-Our goal is to find the effect that certain voter specific characteristics and non-partisan views have on a voter voting for Joe Biden. For that, we consider the framework of the model by considering the response variable, the input variables, and how they come together within the model structure.
+This model seeks to quantify the extent to which short-term shocks in market returns can forecast volatility outlooks two months ahead. Given the financial market's complexity and the intricacies involved in volatility forecasting, the decision to focus on a two-month horizon stems from previous studies indicating significant correlations within this timeframe. The choice of a linear model is supported by preliminary analyses suggesting a linear trend in the changes of VIX levels following shifts in market returns.
 
-#### Response Variable ####
+The variables' quantitative properties, such as their distribution and scale, were thoroughly assessed to ensure that the GLM's assumptions of linearity, independence, and homoscedasticity are reasonably satisfied. The model incorporates normal priors for the regression coefficients, reflecting a belief in the absence of extreme effects unless supported by the data. 
 
-Our variable of interest is voter preferences for Joe Biden. We assume that voting preference for Biden is a random variable and has a $\mbox{Bern}(\pi_i)$ distribution with $\pi_i$ being the 'likelihood of voting for Biden'. We choose specifically the random variable characterization because voting outcomes aren't deterministic but rather phenomenon subject to chance. This also aligns with the voting patterns we observe in the real world. 
 
-We estimate the 'likelihood of voting for Biden' by the using the conditional probability of voting for Biden given a certain respondent. 
+## Model Implementation and Diagnostics
 
-#### Input Variables ####
+The model was implemented using the rstanarm [@rstanarm] package, which facilitates Bayesian inference, providing a robust framework for parameter estimation and model uncertainty.
 
-The voter specific characteristics that we consider are:
-
-1. Gender
-2. Race
-3. Education
-4. Change in Income
-
-The non-partisan view of the respondents that we consider is:
-
-1. Economic Outlook 
-
-We assume for this analysis that all 5 variables have Normal prior distributions as based of our prior information, we can't conclude any specific form for any of the variables' distributions. All we can conclude is that the extreme values taken by each variable are less likely than their intermediate values and hence a suitable distribution to describe flat tails with a peak in the center is the normal distribution.
-
-#### Model Structure #####
-
-We construct a model that gives the conditional probability of voting for Biden from only the above 5 input variables. Probability is a measure taking values from $[0,1]$ which is why we use the logit function to transform the conditional probability to the unbounded real line. The logit function is appropriate in this context because it preserves the ordering of probabilities while expanding them to the entire real line. 
-
-Once we have the $logit(\pi_i)$, we define a linear relationship between this quantity and the 5 categorical variables. Taking the inverse of the logit function gives probability as a function of the 5 categorical variables. We then use this model to study the impact of the 5 categorical variables on voting for Biden. 
-
-\begin{align}
-\text{logit}(\pi_i) &=  \beta_0 \, + \, \beta_1 \times \text{gender}_i
-\, + \, \beta_2 \times \text{education}_i \, +  \, \beta_3 \times \text{race}_i \\
-&\quad \, + \, \beta_4 \times \text{economic outlook}_i
-\, + \, \beta_5 \times \text{income change}_i \\
-\pi_i &= \text{logit}^\text{-1} \text{(} \beta_0 \, + \, \beta_1 \times \mbox{gender}_i \,
-+ \, \beta_2 \times \text{education}_i \, +  \, \beta_3 \times \text{race}_i \\
-&\quad \, + \, \beta_4 \times \text{economic outlook}_i \,
-+ \, \beta_5 \times \text{income change}_i \text{)}
-\end{align}
-
-#### Parameter Estimation ####
-
-The model has 6 parameters  $\beta_0$, $\beta_1$, $\beta_2$, $\beta_3$, $\beta_4$, $\beta_5$ which need to be estimated from the cleaned_data dataset. These parameters are estimated by defining the model within the stan_glm() function from the [@Rpackage_rstanarm] package. The function uses Markov Chain Monte Carlo (MCMC) algorithms to create a chain of samples from the posterior distribution of each coefficient. This not only gives us point estimates, but also the posterior distribution of values for each coefficient. 
-
-The posterior distribution contains information about all of the coefficients moments, giving us estimates for not only the central values, but also the uncertainty associated with each estimate. Using the central moments as well as the 95% credibility intervals for the coefficients, helps us determine whether the input variables have an effect on voting preferences. 
-
+Parameter estimation was approached from a Bayesian perspective, enabling the incorporation of prior knowledge and direct probability statements about the parameters. Diagnostics from the GLM included checks for multicollinearity, leverage points, and influence measures, facilitated by standard diagnostic plots and summary statistics produced during the fitting process. These diagnostics help ensure the model's appropriateness and the reliability of the inferences drawn from the analysis.
 
 # Results
 
-This section looks at the results of the regression performed using the Model from the Model section and the cleaned data set. We first look at the results of our regression analysis, which includes, the parameter estimates and their credibility intervals. Subsequently, we explore select variables of interest and their effects on the probability of voting for Biden. Finally, we assess model fit using the $R^2$ metric and compare our final model's $R^2$ to the same model with certain terms dropped in order to assess the explanatory power of our model.  
+## Overview
 
-## Regression Results
+This section presents the findings from the regression analysis conducted to explore the relationship between short-term market fluctuations and future market volatility expectations, specifically looking at a two-month horizon. The analysis centers around the lagged impact of market returns on the VIX index, interpreted as a proxy for market risk perception. Various lags, ranging from no lag up to four months, were examined to pinpoint the timing and strength of this relationship.
 
-@tbl-coefficient-estimates contains the parameter estimates for the regression analysis. The regression analysis was done on a random sample of 10,000 observations out of 39,203 in order to speed up computational time while preserving the properties of the dataset. The first column of the @tbl-coefficient-estimates contains the parameter name. Since all the input variables are categorical variables, the regression creates indicator terms for each value the variable takes and estimates a unique coefficient based of that. 
+## Detailed Regression Outcomes
 
-The second column contains the actual parameter point estimates. These estimates are based of the stan_glm() function from the [@Rpackage_rstanarm] package. The third column gives the standard error while the 4th and 5th columns give the lower and upper limit for the credibility intervals. The table was created from the model using the tidy() function from the [@Rpackage_broom_mixed] package, while the 'kable()' and 'kable_styling()' functions were used from [@Rpackage_knitr] and [@Rpackage_kableExtra]. 
+The regression model provided robust results that articulate the dynamic relationship between market returns and subsequent volatility expectations. Here are the summarized outcomes of the regression:
 
-@fig-coefficient-estimates creates a plot of @tbl-coefficient-estimates with the estimate and standard errors shown. The plot shows the credibility intervals for each parameter.
-
+- Intercept: -0.044
+- Market Shock Detailed Coefficients Coefficient: -0.561
+- Number of Observations: 185
+- Adjusted R-squared: 0.467
+- Log Likelihood: -440.738
+- Expected Log Pointwise Predictive Density (ELPD): -444.7
+- Standard Error of ELPD: 17.8
+- Leave-One-Out Information Criterion (LOOIC): 889.5
+- Standard Error of LOOIC: 35.7
+- Watanabe-Akaike Information Criterion (WAIC): 889.5
+- Root Mean Square Error (RMSE): 2.61
 
 ```{r}
 #| echo: false
 #| warning: false
 #| message: false
-#| label: tbl-coefficient-estimates
-#| tbl-cap: Parameter Estimates of the Multiple Logistic Regression
+#| label: fig-regression-model
 
+### Model data ####
+
+#### Workspace setup ####
+library(rstanarm)
+library(broom)
 library(broom.mixed)
-library(knitr)
-library(kableExtra)
+library(modelsummary)
+library(arrow)
+library(ggplot2)
 
-coeff <- tidy(voter_outcomes_model, conf.int = TRUE)
-cleaned_coeff <- kable(coeff, col.names = c(
-                        "Parameter", "Estimate", "Standard Error",
-                        "Credibility Interval Lower Limit", 
-                        "Credibility Interval Upper Limit"),
-                         digits = 2)
-cleaned_coeff
+
+## Plot results
+p <- ggplot(detailed_coeffs_df, aes(x = Market_Return_Detail, y = VIX_Detail)) +
+  geom_point(alpha = 0.6, color = "blue", size = 3) +
+  geom_smooth(method = "glm", method.args = list(family = gaussian()), 
+              se = TRUE, color = "red", fill = "pink") +
+  labs(title = "Regression of VIX on Market Shocks",
+       x = "Market Return Detail Coefficients",
+       y = "VIX Detail Coefficients",
+       caption = "Detail Coefficients of the 2 month Cycle") +
+  theme_minimal() +
+  theme(text = element_text(size = 12),
+        plot.title = element_text(face = "bold", hjust = 0.5),
+        plot.caption = element_text(hjust = 0, color = "grey50"))
+
+print(p)
+
 ```
+
+The model's negative slope coefficient for Market Shock Detailed Coefficients (-0.561) suggests a strong inverse relationship between market returns and future volatility expectations. Specifically, this indicates that positive shocks in market returns lead to a decrease in volatility expectations two months later, reflecting reduced risk aversion among investors. Conversely, negative market shocks result in increased volatility expectations, indicating heightened risk aversion. This dynamic is crucial for understanding investor behavior and market sentiment shifts.
+
+The Adjusted R-squared value of 0.467 implies that approximately 46.7% of the variability in future volatility expectations can be explained by the current market return shocks, underlining the significant predictive power of short-term market movements on future risk perceptions.
+
+## Regression Model Performance
+
+We can analyze the regression model's performance by lagging the VIX coefficients in order to find the time period that has the strongest effect of market fluctuations. The regression model's performance across different lags is quantitatively summarized by R-squared values, which indicate the proportion of variance in the dependent variable (VIX index detail coefficients) that is predictable from the independent variable (market return detail coefficients). Figure 1 below illustrates the progression of R-squared values across different lags:
 
 ```{r}
 #| echo: false
-#| eval: true
-#| warning: false
-#| label: fig-coefficient-estimates
-#| fig-cap: Parameter Estimates and Confidence Intervals
-
-modelplot(voter_outcomes_model, conf_level = 0.9) +
-  labs(x = "90 per cent credibility interval")
-```
-
-From the table and the plot, we observe that the gender variable has a negative coefficient estimate, indicating that given the respondent is male holding all else fixed, they have a lower probability of voting Biden compared to Trump. The coefficient estimates for education are all positive indicating that a respondent with a high school degree or higher has a higher probability of voting for Biden over Trump. The coefficient estimates for Race are positive for all categories except 'two or more races' and 'native american' indicating that given a respondent is either 'Black', 'Asian', 'Middle Eastern' or 'Hispanic', they have a higher probability of favoring Biden.
-
-The economic variables which are 'economic outlook' and 'income change' have distinct patterns compared to the demographic variables which are 'Gender', 'Education', and 'Race'. For one, the economic outlook coefficients, given in @tbl-coefficient-estimates are all positive but much larger in magnitude than any of the other variable coefficients. This indicates that given a respondent who's outlook on the economy is between neutral and poor, we find that the respondent has a very high probability of favoring Biden over Trump.
-
-The same holds for change in income as most of the income coefficients are positive but negligible. This indicates that the respondents preferences based of income change are not very significant.
-
-### Model Fit ###
-
-We now assess the fit of the model to the data. The statistic that validates model fit in this situation is $R^2$. We compare our models $R^2$ with the $R^2$ of the model:
-
-1. Taking only demographic variables (Gender, Race, Education)
-2. Taking only economic variables (Economic Outlook, Income Change)
-
-These 2 different variants of the model are taken to show the improvement that our final model makes over both of them. We consider $R^2$ as a measure of model fit as it's a measure of the variation within the data explained by the model. The $R^2$ of all 3 models are given in @tbl-R-squared-estimates. The first column lists the parameters along with different statistical measures, including $R^2$. The second column gives the gives the coefficient estimates and $R^2$ of the main model. The third column gives the coefficient estimates and $R^2$ of the model taking only demographic variables as the input variables. The third column gives the same but for economic variables. 
-
-```{r}
-#| echo: false
-#| eval: true
 #| warning: false
 #| message: false
-#| label: tbl-R-squared-estimates
-#| tbl-cap: Models Coefficients and R-Squared Estimates
+#| label: fig-R-squared-by-lags
 
-library(modelsummary)
+# Load necessary library
+library(ggplot2)
 
-model_summary <- modelsummary( 
-  list (
-    "Main Model" = voter_outcomes_model, 
-    "Economic Only" = voter_outcomes_demographic_only_model,
-    "Demographic Only" = voter_outcomes_economic_only_model
-      )
-    )
-model_summary
+# R squared values by lag
+lags <- factor(c("No Lag", "1 Month Lag", "2 Month Lag", "3 Month Lag", "4 Month Lag"), 
+               levels = c(
+                 "No Lag", 
+                 "1 Month Lag", 
+                 "2 Month Lag", 
+                 "3 Month Lag", 
+                 "4 Month Lag")
+               )
+r_squared_values <- c(0.032, 0.237, 0.478, 0.003, 0.019)
+
+# Create a data frame for plotting
+data <- data.frame(Lag = lags, R_Squared = r_squared_values)
+
+# Create the column chart
+p <- ggplot(data, aes(x = Lag, y = R_Squared, fill = Lag)) +
+  geom_col(show.legend = FALSE, width = 0.6) +
+  geom_text(aes(label = sprintf("%.3f", R_Squared)), vjust = -0.5, size = 3.5) +
+  labs(title = "R Squared Values by Lag",
+       subtitle = "Visualizing the impact of market fluctuations on future volatility",
+       x = "Lag",
+       y = "R Squared Value",
+       caption = "Lag in bi-monthly cyclic VIX fluctuatations") +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5),
+        plot.subtitle = element_text(hjust = 0.5),
+        axis.title = element_text(size = 12, face = "bold"),
+        axis.text = element_text(size = 10),
+        plot.caption = element_text(hjust = 0, face = "italic"))
+
+# Print the plot
+print(p)
+
 ```
 
-@tbl-R-squared-estimates shows that the $R^2$ for the main model is 0.458 while the $R^2$ for the demographic only model and economic only model is 0.104 and 0.383 respectively. This shows that the demographic only model's fit is significantly less than our final model's, showing that considering economic variables in the analysis significantly boosted model fit. 
 
-When we look at the model with only economic variables, we find that a good amount of variation in model is explained by these 2 variables, evidenced by the comparatively high $R^2$ of 0.383. The model though lacks some interpretability and can be improved by considering the demographic variables on top. This leads us back to our main model, with the highest $R^2$ between the 3.
+@fig-R-squared-by-lags clearly shows that the influence of market fluctuations on future volatility perceptions peaks significantly at a two-month lag with an R-squared value of 0.478, indicating a strong predictive relationship at this point. This peak suggests that the market's response to shocks is most predictive of volatility perceptions two months later, before diminishing in influence.
 
-# Discussion
 
-## Demographic Characteristics Effect on Voter Preference
+# Discussion Section
 
-In this paper we examined how race, education, gender, economic outlook and change in income impacted voters’ preferences for Biden over Trump in the 2020 US presidential election. Our analysis showed that Biden voters thought the nation's economy got much worse. Furthermore, voters that supported Biden were female, Black, Hispanic, and Asian. They possessed a minimum of a four-year college degree or higher. Finally, they were white and non-white college graduates as well as non-white without a four-year college degree. Overall, Biden voters were women, more racially diverse with greater education attainment.
+## Overview of Research and Insights
 
-Our data and other research we conducted on education as well as education by race was consistent. There were a few discrepancies in the data we analyzed and previous research with regards to gender and race. 
+In this study, we've conducted a detailed analysis of how short-term market shocks influence future market volatility expectations, particularly looking two months ahead. Our results indicate a statistically significant relationship where current market shocks predict future volatility, as evidenced by changes in the VIX index, a popular measure of market risk and investor sentiment.
 
-First, voters’ gender on voting preferences were contradictory. Our data demonstrated a greater percent of women voted for Biden whereas [@citeIgielnik] points out that Biden received more votes from men. A plausible explanation for this difference is a small difference in gender preferences. Further research should be done as well as observing previous election results to determine whether voters' gender really is a reliable predictor of voting preferences in US elections.
+## Psychological Bias and Market Participant Behavior
 
-Secondly, our data on race was congruent with Whites, Blacks and Asians. Our data indicated Hispanics voted for Biden however other research suggests Hispanics were more inclined to vote for Trump. Another incongruence involves the 'other' race category in that our data signifies the other group voted Trump however research alludes this group as being Biden supporters. A possible reason for this inconsistency is that in our data, the other category consists of only three percent of electorates and Hispanics ten percent. Having such a small representation of these groups increases the likelihood of discrepancies in results.
+Our analysis supports the hypothesis that current market shocks significantly influence future market volatility expectations. Specifically, a positive shock in market returns tends to decrease future volatility expectations, suggesting that investors expect positive trends to continue, thereby reducing their demand for risk protection. Conversely, a negative shock increases volatility expectations, indicative of heightened risk aversion. This behavior underscores a psychological bias among market participants where current conditions are expected to persist into the future, a phenomenon often referred to as the "momentum effect" in financial economics. Such findings challenge the Efficient Market Hypothesis (EMH), which posits that current prices reflect all available information, making it impossible to predict future prices based on past or present data.
 
-## Economic Characteristics Effect on Voter Preference
+## The Role of the Efficient Markets Hypothesis
 
-Perhaps the strongest effect on voting preference, was through the economic outlook variable. The coefficients were on orders of magnitude 2-3 times larger than the coefficients for the other variables. This indicates the prevalence of a poor economy sentiment among majority of the voter base. This also shows that the prevelance of a weak economy during the pandemic influenced the political preferences of voters and shifted a large amount of the populace in favor of Biden.
+Our analysis challenges the Efficient Market Hypothesis (EMH), which asserts that current prices fully reflect all available information, making it impossible to predict future prices based on past data. However, our findings reveal an anomaly where past and present market conditions do have predictive power over future volatility. This suggests inefficiencies in the market where informed investors might exploit these insights to adjust their risk management strategies. For example, an investor who anticipates an increase in volatility two months ahead based on current negative shocks could strategically invest in risk management instruments like options or futures. When the anticipated increase in volatility materializes, the demand for these instruments rises, potentially allowing the investor to sell at a profit. Conversely, if a positive shock is observed, the investor might take a contrary position, anticipating a decrease in volatility.
 
-This, coupled with the fact that a majority of voters who saw their incomes reduce favored Biden, alludes to the possibility that a weak economy during election season prompted an anti-incumbency sentiment amongst many voters, influencing them to vote for Biden.
+## Implications for Risk Management
 
-The effect of both these variables on voting preference for Biden is interesting because, for one, they had the strongest combined effect, and also are characteristics which aren't easily predictable based of a voters demographics. Also, when we ran our regression with only these 2 variables, they had better predictive power than the model with only the demographic variables involved. Therefore, economic characteristics may be the key to understanding voter preferences, and combined with demographic characteristics, tell a compelling story of voter outcomes.
- 
-## Weaknesses 
+The ability to anticipate future volatility based on current market conditions can significantly impact risk management strategies. Investors can use these insights to better time their entries and exits in risk management instruments, optimizing their investment returns by capitalizing on predicted fluctuations in market volatility. This proactive approach to risk management, based on predictive insights from market shocks, offers a strategic advantage in navigating the options and futures markets.
 
-A major weakness of our analysis is assuming a linear model for voting preferences as a function of demographic and economic characteristics. Assuming linearity hids a lot about the mechanism through which these characteristics influence voting outcomes. Though model interpretability is increased, we lose any sound understanding of the mechanism underlying the phenomenon that we aim to model.
+## Weaknesses and Limitations
 
-## Next steps 
- 
-Despite taking place during COVID-19, the 2020 election showed the highest turnout in the 21st century, where 66.8% of eligible voters voted. This is up from 60.1% in the previous election in 2016, most likely due to the addition of nontraditional methods of voting such as early voting and mailing ballots to ensure adequate voter turnout [@citeFabina]. A potential probe is looking at the demographics behind those that voted by mail, absentee, early or on the traditional day. For example, [@citeIgielnik] states Hispanic and whites voted by mail whereas blacks voted early in person.
+While our study provides crucial insights, it has several limitations:
 
-A possible area of additional research could question the correlation between voters’ race and the race of the candidate they vote for. For instance, investigating the different demographics that voted for Biden, a white male candidate compared to his running mate, Kamala Harris a black female candidate. Additionally, white respondents who showed high levels of radical resentment were more likely to vote for Joe Biden as opposed to Kamala Harris. Not only was Harris at a disadvantage because of her race but also because of her gender. [@citeNelson] states that “hostile sexism” may play a role in Harris’s success in the election (2021). The combination of these two variables could lead to interesting findings.
+ - We rely solely on the VIX to measure volatility, which might not capture all aspects of market risk.
+ - The assumption of linearity in the relationship between market shocks and changes in volatility might not hold under all market conditions, potentially oversimplifying the dynamics involved.
 
-Additional research could look in the direction of age as a predictor in the US election. [@citeLees], with the use of 1000 research participants through a multi-step design, finds voters aged 49 and younger were in support of Biden whereas the older population favored Trump, however, not by a significant amount. Another trend portrayed the insignificance of candidates age on voter preference. Young adults aged 30 and below indicated that voting for a candidate that is over the age of 70 did not change their voting decision. At the time of the election, both Biden and trump were over the age of 70 [@citeLees]. Thus further research is necessary to determine the reliable relationship between age and voting preferences.
+The two-month forecast horizon, while significant, limits our understanding of how longer or shorter periods might behave, which could vary considerably.
+Additional weaknesses include potential data anomalies and the exclusion of other macroeconomic factors that could influence volatility.
 
+## Future Research Directions
+
+Future research could explore the predictive power of different market indicators alongside the VIX, incorporating macroeconomic variables to deepen our understanding of volatility drivers. Investigating different time scales, such as 2-4 months or 4-8 months, and even long-term business cycle fluctuations lasting years, could provide a more comprehensive view of market dynamics. Employing nonlinear models or machine learning techniques could also enhance the accuracy of volatility predictions.
+
+# Conclusion
+
+This research underscores the significance of understanding psychological biases in financial markets, highlighting how short-term market shocks can influence investor behavior and future market conditions over a two-month horizon. Despite the foundational principles of the EMH, our study reveals potential inefficiencies that could be exploited to manage risk more effectively, suggesting that current market shocks do have a discernible impact on future volatility expectations.
 
 \newpage
 

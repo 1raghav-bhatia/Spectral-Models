@@ -12,6 +12,7 @@ library(arrow)
 library(forecast)
 library(wavethresh)
 library(tidyverse)
+library(wavelets)
 
 #### Clean data ####
 

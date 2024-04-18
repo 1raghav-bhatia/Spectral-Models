@@ -44,24 +44,7 @@ market_shock_regression <- stan_glm(
 )
 
 ## Summary and diagnostics
-summary(market_shock_regression)
 modelsummary(market_shock_regression)
-
-## Plot results
-p <- ggplot(detailed_coeffs_df, aes(x = Market_Return_Detail, y = VIX_Detail)) +
-  geom_point(alpha = 0.6, color = "blue", size = 3) +
-  geom_smooth(method = "glm", method.args = list(family = gaussian()), 
-              se = TRUE, color = "red", fill = "pink") +
-  labs(title = "Regression of VIX on Market Return Details",
-       x = "Market Return Detail Coefficients",
-       y = "VIX Detail Coefficients",
-       caption = "Data Source: Detailed Coefficients from Financial Models") +
-  theme_minimal() +
-  theme(text = element_text(size = 12),
-        plot.title = element_text(face = "bold", hjust = 0.5),
-        plot.caption = element_text(hjust = 0, color = "grey50"))
-
-print(p)
 
 #### Save model ####
 saveRDS(market_shock_regression, file = "models/market_shock_regression.rds")
