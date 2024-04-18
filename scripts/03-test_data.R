@@ -1,47 +1,62 @@
 #### Preamble ####
-# Purpose: Tests the cleaned dataset
-# Author: Carl Fernandes, Lexi knight, Raghav Bhatia 
-# Date: 12 March 2024
+# Purpose: Tests the cleaned datasets of residual and VIX level one coefficients
+# Author: Raghav Bhatia 
+# Date: 16 April 2024
 # Contact: raghav.bhatia@mail.utoronto.ca
 # License: MIT
-
 
 #### Workspace setup ####
 library(tidyverse)
 library(testthat)
+library(arrow)
 
 #### Test data ####
 
-#### Reads the cleaned dataset 
+# Reads the cleaned datasets
 
-ces2020_data <- read_parquet("data/cleaned_data/ces2020_cleaned/part-0.parquet")
+residuals_data <- 
+  read_parquet("data/cleaned_data/detail_coefficients_vix.parquet")
+vix_data <- 
+  read_parquet("data/cleaned_data/detail_coefficients_market_shock.parquet")
 
-# Test if the dataset has 100 entries
-test_that("Dataset has 100 entries", {
-  expect_equal(nrow(ces2020_data), 39203)
+## Testing Residuals Data
+
+# Test if the residuals dataset has the expected number of entries
+test_that("Residuals dataset has the expected number of entries", {
+  expect_equal(nrow(residuals_data), 186)  # Assuming 185 is the expected number of entries
 })
 
-# Test if 'gender' only contains 'Male' and 'Female'
-test_that("Gender variable is correct", {
-  expect_true(all(ces2020_data$gender %in% c('Male', 'Female')))
+
+# Test the range of 'Residuals_Detail' values
+test_that("Residuals Detail values are within expected range", {
+  expect_true(all(residuals_data$Residuals_Detail > -100 & residuals_data$Residuals_Detail < 100))
 })
 
-# Test if 'education' contains the correct levels
-test_that("Education variable is correct", {
-  expect_true(all(ces2020_data$education %in% c('No HS', 'High school graduate', 'Some college', '2-year', '4-year', 'Post-grad')))
+# Test for the presence of NA values in the residuals dataset
+test_that("No NA values are present in the residuals dataset", {
+  expect_true(all(complete.cases(residuals_data)))
 })
 
-# Test if 'race' contains the correct categories
-test_that("Race variable is correct", {
-  expect_true(all(ces2020_data$race %in% c('White', 'Black', 'Hispanic', 'Asian', 'Native American', 'Middle Eastern', 'Two or more races')))
+## Testing VIX Data
+
+# Test if the VIX dataset has the expected number of entries
+test_that("VIX dataset has the expected number of entries", {
+  expect_equal(nrow(vix_data), 185)  # Matching the residuals dataset
 })
 
-# Test if 'national_economics' contains the correct categories
-test_that("National Economics variable is correct", {
-  expect_true(all(ces2020_data$economic_outlook %in% c('Gotten much better', 'Gotten somewhat better', 'Stayed about the same', 'Gotten somewhat worse', 'Gotten much worse', 'Not sure')))
+
+# Test the range of 'VIX_Detail' values
+test_that("VIX Detail values are within expected range", {
+  expect_true(all(vix_data$VIX_Detail > -100 & vix_data$VIX_Detail < 100))
 })
 
-# Test if 'household_income' contains the correct categories
-test_that("Household Income variable is correct", {
-  expect_true(all(ces2020_data$income_change %in% c('Increased a lot', 'Increased somewhat', 'Stayed about the same', 'Decreased somewhat', 'Decreased a lot')))
+# Test for the presence of NA values in the VIX dataset
+test_that("No NA values are present in the VIX dataset", {
+  expect_true(all(complete.cases(vix_data)))
+})
+
+# Test the correlation expectation between 'Residuals_Detail' and 'VIX_Detail'
+test_that("Correlation between Residuals Detail and VIX Detail meets expectation", {
+  correlation <- cor(residuals_data$Residuals_Detail, vix_data$VIX_Detail)
+  expect_true(correlation < 0, info = "Expecting a negative correlation as per the analysis findings")
 })
